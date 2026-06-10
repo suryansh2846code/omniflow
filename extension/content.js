@@ -21,8 +21,22 @@
     status: 'waiting',
     startTime: null,
     endTime: null,
-    checkIntervalId: null
+    checkIntervalId: null,
+    logs: [],
+    promptAccepted: false,
+    generationStarted: false,
+    generationCompleted: false
   };
+
+  // Global generate lock to prevent concurrent generate operations
+  window.__omniflowGenerateInProgress = window.__omniflowGenerateInProgress || false;
+
+  function generateLog(msg, type = 'info') {
+    console.log(`[OmniFlow][Generate] ${msg}`);
+    if (window.__omniflowGenState && window.__omniflowGenState.logs) {
+      window.__omniflowGenState.logs.push({ text: `[Generate] ${msg}`, type });
+    }
+  }
 
   console.log('[OmniFlow][Content] Content script initialised (Phase 3).');
 
@@ -62,7 +76,7 @@
    * Check if the page is currently generating a video (Phase 3).
    * Scans for loading states, progress bars, and stop/cancel indicators.
    *
-   * @returns {boolean}
+   * @returns {{ generating: boolean, rule: string }}
    */
   function isPageGenerating() {
     // 1. Check for visible stop/cancel buttons
@@ -71,7 +85,9 @@
       const text = (btn.textContent || btn.getAttribute('aria-label') || '').trim().toLowerCase();
       return text.includes('stop') || text.includes('cancel');
     });
-    if (stopButton) return true;
+    if (stopButton) {
+      return { generating: true, rule: 'stop_button' };
+    }
 
     // 2. Check for active progress bar or loading indicators
     const progressSelectors = [
@@ -83,11 +99,54 @@
       document.querySelectorAll(progressSelectors.join(', '))
     ).filter(isVisible);
 
-    if (progressIndicators.length > 0) return true;
+    if (progressIndicators.length > 0) {
+      return { generating: true, rule: 'progress_indicator' };
+    }
 
     // 3. Check for specific text indicators in page content
     const bodyText = document.body.innerText || '';
+    
+    // Gemini-specific text indicators
+    const geminiIndicators = [
+      "Generating your video",
+      "I'm generating your video",
+      "This could take a few minutes"
+    ];
+    
+    for (const indicator of geminiIndicators) {
+      if (bodyText.includes(indicator)) {
+        return { generating: true, rule: `gemini_text:${indicator}` };
+      }
+    }
+
     if (bodyText.includes('Generating video...') || bodyText.includes('Creating video...')) {
+      return { generating: true, rule: 'general_text' };
+    }
+
+    return { generating: false, rule: 'none' };
+  }
+
+  /**
+   * Check if video generation has completed (Phase 4).
+   * @returns {boolean}
+   */
+  function isGenerationCompleted() {
+    // 1. Check for Play, Share, or Download buttons
+    const buttonTexts = ['play video', 'share video', 'download video'];
+    const completionButton = Array.from(document.querySelectorAll('button, [role="button"]')).find(btn => {
+      if (!isVisible(btn)) return false;
+      const text = (btn.textContent || btn.getAttribute('aria-label') || '').trim().toLowerCase();
+      return buttonTexts.some(bt => text.includes(bt));
+    });
+    if (completionButton) {
+      console.log(`[OmniFlow][Monitor] Video ready detected via button: "${completionButton.textContent.trim()}"`);
+      return true;
+    }
+
+    // 2. Check for "Your video is ready!" text on the page
+    const bodyText = document.body.innerText || '';
+    if (bodyText.includes('Your video is ready!')) {
+      console.log('[OmniFlow][Monitor] Video ready detected via page text: "Your video is ready!"');
       return true;
     }
 
@@ -95,9 +154,46 @@
   }
 
   /**
-   * Starts monitoring the video generation progress.
+   * Helper to log DOM details before event execution.
    */
-  function startGenerationMonitoring() {
+  function logClickDiagnostics(button) {
+    if (!button) return;
+    const activeBefore = document.activeElement;
+    const activeText = activeBefore ? `<${activeBefore.tagName.toLowerCase()}> id="${activeBefore.id}" class="${activeBefore.className}"` : 'none';
+    
+    const diagLogs = [
+      'Click Diagnostics:',
+      `  activeElement: ${activeText}`,
+      `  button.disabled: ${button.disabled}`,
+      `  aria-disabled: ${button.getAttribute('aria-disabled')}`,
+      `  button type: ${button.getAttribute('type') || 'none'}`,
+      `  button role: ${button.getAttribute('role') || 'none'}`
+    ];
+    
+    // Dispatch test click to check returnValue
+    try {
+      const clickEv = new MouseEvent('click', { bubbles: true, cancelable: true });
+      const dispatched = button.dispatchEvent(clickEv);
+      diagLogs.push(`  test click dispatch result: ${dispatched} (preventDefault: ${clickEv.defaultPrevented})`);
+    } catch (e) {
+      diagLogs.push(`  test click dispatch error: ${e.message}`);
+    }
+
+    diagLogs.forEach(line => {
+      console.log(`[OmniFlow][Diag] ${line}`);
+      if (window.__omniflowGenState && window.__omniflowGenState.logs) {
+        window.__omniflowGenState.logs.push({ text: `[Diag] ${line}`, type: 'info' });
+      }
+    });
+  }
+
+  /**
+   * Starts monitoring the video generation progress (Phase 4.1).
+   * Strictly reads DOM state, does not simulate clicks/triggers.
+   * @param {Element} button
+   * @param {Element} editor
+   */
+  function startGenerationMonitoring(button, editor) {
     console.log('[OmniFlow][Monitor] Generation started');
     
     // Clear any existing monitor
@@ -105,48 +201,137 @@
       clearInterval(window.__omniflowGenState.checkIntervalId);
     }
 
+    // Preserve existing logs and promptAccepted status if present
     window.__omniflowGenState = {
       status: 'waiting',
       startTime: Date.now(),
       endTime: null,
-      checkIntervalId: null
+      checkIntervalId: null,
+      logs: window.__omniflowGenState.logs || [],
+      promptAccepted: window.__omniflowGenState.promptAccepted || false,
+      generationStarted: false,
+      generationCompleted: false
     };
 
     window.__omniflowGenState.checkIntervalId = setInterval(() => {
       const elapsed = (Date.now() - window.__omniflowGenState.startTime) / 1000;
-      const currentlyGenerating = isPageGenerating();
+      const genInfo = isPageGenerating();
+      const currentlyGenerating = genInfo.generating;
+      const currentlyCompleted = isGenerationCompleted();
 
-      console.log(`[OmniFlow][Monitor] Generation status: ${window.__omniflowGenState.status}, currentlyGenerating: ${currentlyGenerating}, elapsed: ${elapsed.toFixed(1)}s`);
+      console.log(
+        `[OmniFlow][Monitor] Generation status: ${window.__omniflowGenState.status}, ` +
+        `currentlyGenerating: ${currentlyGenerating}, currentlyCompleted: ${currentlyCompleted}, ` +
+        `elapsed: ${elapsed.toFixed(1)}s`
+      );
 
       if (window.__omniflowGenState.status === 'waiting') {
-        if (currentlyGenerating) {
+        if (currentlyCompleted) {
+          window.__omniflowGenState.status = 'completed';
+          window.__omniflowGenState.generationStarted = true;
+          window.__omniflowGenState.promptAccepted = true;
+          window.__omniflowGenState.generationCompleted = true;
+          window.__omniflowGenState.endTime = Date.now();
+          
+          console.log('[OmniFlow][Monitor] Video ready detected');
+          console.log('[OmniFlow][Monitor] Generation completed');
+          if (window.__omniflowGenState.logs) {
+            window.__omniflowGenState.logs.push({ text: '[Monitor] Video ready detected', type: 'ok' });
+            window.__omniflowGenState.logs.push({ text: '[Monitor] Generation completed', type: 'ok' });
+          }
+          
+          // Release generate lock
+          window.__omniflowGenerateInProgress = false;
+          generateLog('Generate lock released', 'ok');
+          
+          clearInterval(window.__omniflowGenState.checkIntervalId);
+          window.__omniflowGenState.checkIntervalId = null;
+        } else if (currentlyGenerating) {
           window.__omniflowGenState.status = 'generating';
-          console.log('[OmniFlow][Monitor] Generation in progress');
+          window.__omniflowGenState.generationStarted = true;
+          window.__omniflowGenState.promptAccepted = true;
+          
+          if (genInfo.rule.startsWith('gemini_text:')) {
+            console.log('[OmniFlow][Monitor] Gemini text generation indicator detected');
+            if (window.__omniflowGenState.logs) {
+              window.__omniflowGenState.logs.push({ text: '[Monitor] Gemini text generation indicator detected', type: 'info' });
+            }
+          }
+          
+          console.log('[OmniFlow][Monitor] Generation started');
+          if (window.__omniflowGenState.logs) {
+            window.__omniflowGenState.logs.push({ text: '[Monitor] Generation started', type: 'ok' });
+          }
         } else {
           // If no generation indicators appear within 15 seconds
           if (elapsed > 15) {
             window.__omniflowGenState.status = 'no_gen_detected';
             window.__omniflowGenState.endTime = Date.now();
             console.warn('[OmniFlow][Monitor] Generation aborted: No generation detected within 15 seconds.');
+            if (window.__omniflowGenState.logs) {
+              window.__omniflowGenState.logs.push({ text: '[Monitor] Generation aborted: No generation detected within 15 seconds.', type: 'warn' });
+            }
+            
+            // Release generate lock
+            window.__omniflowGenerateInProgress = false;
+            generateLog('Generate lock released', 'warn');
+            
             clearInterval(window.__omniflowGenState.checkIntervalId);
             window.__omniflowGenState.checkIntervalId = null;
           }
         }
       } else if (window.__omniflowGenState.status === 'generating') {
-        if (currentlyGenerating) {
+        if (currentlyCompleted) {
+          window.__omniflowGenState.status = 'completed';
+          window.__omniflowGenState.generationCompleted = true;
+          window.__omniflowGenState.endTime = Date.now();
+          
+          console.log('[OmniFlow][Monitor] Video ready detected');
+          console.log('[OmniFlow][Monitor] Generation completed');
+          if (window.__omniflowGenState.logs) {
+            window.__omniflowGenState.logs.push({ text: '[Monitor] Video ready detected', type: 'ok' });
+            window.__omniflowGenState.logs.push({ text: '[Monitor] Generation completed', type: 'ok' });
+            window.__omniflowGenState.logs.push({ text: `[Monitor] Total time: ${elapsed.toFixed(1)}s`, type: 'info' });
+          }
+          
+          // Release generate lock
+          window.__omniflowGenerateInProgress = false;
+          generateLog('Generate lock released', 'ok');
+          
+          clearInterval(window.__omniflowGenState.checkIntervalId);
+          window.__omniflowGenState.checkIntervalId = null;
+        } else if (currentlyGenerating) {
           // Maximum monitoring time: 5 minutes (300 seconds)
           if (elapsed > 300) {
             window.__omniflowGenState.status = 'timeout';
             window.__omniflowGenState.endTime = Date.now();
             console.error('[OmniFlow][Monitor] Generation aborted: Timed out after 5 minutes.');
+            if (window.__omniflowGenState.logs) {
+              window.__omniflowGenState.logs.push({ text: '[Monitor] Generation aborted: Timed out after 5 minutes.', type: 'error' });
+            }
+            
+            // Release generate lock
+            window.__omniflowGenerateInProgress = false;
+            generateLog('Generate lock released', 'error');
+            
             clearInterval(window.__omniflowGenState.checkIntervalId);
             window.__omniflowGenState.checkIntervalId = null;
           }
         } else {
-          // Generation completed
+          // Indicators disappeared, assume completion
           window.__omniflowGenState.status = 'completed';
+          window.__omniflowGenState.generationCompleted = true;
           window.__omniflowGenState.endTime = Date.now();
-          console.log(`[OmniFlow][Monitor] Generation completed. Total time: ${elapsed.toFixed(1)}s`);
+          console.log('[OmniFlow][Monitor] Generation completed');
+          if (window.__omniflowGenState.logs) {
+            window.__omniflowGenState.logs.push({ text: '[Monitor] Generation completed', type: 'ok' });
+            window.__omniflowGenState.logs.push({ text: `[Monitor] Total time: ${elapsed.toFixed(1)}s`, type: 'info' });
+          }
+          
+          // Release generate lock
+          window.__omniflowGenerateInProgress = false;
+          generateLog('Generate lock released', 'ok');
+          
           clearInterval(window.__omniflowGenState.checkIntervalId);
           window.__omniflowGenState.checkIntervalId = null;
         }
@@ -613,7 +798,21 @@
    *
    * @returns {Object} result object matching the OMNIFLOW_GENERATE spec
    */
-  function performGenerate() {
+  async function performGenerate() {
+    // ── Check global generate lock ─────────────────────────
+    if (window.__omniflowGenerateInProgress) {
+      generateLog('Ignoring duplicate generate request', 'warn');
+      return {
+        success: false,
+        error: 'Duplicate generate request ignored. Active generation is in progress.',
+        timestamp: Date.now()
+      };
+    }
+
+    // Acquire lock
+    window.__omniflowGenerateInProgress = true;
+    generateLog('Generate lock acquired', 'ok');
+
     const INJECT_TEXT = 'Create a 5-second cinematic video of a red sports car driving through a futuristic neon-lit city at night, realistic lighting, smooth camera movement, high quality.';
 
     const result = {
@@ -622,7 +821,8 @@
       promptInjected: false,
       buttonFound:    false,
       buttonClicked:  false,
-      strategyUsed:   '',
+      promptAccepted: false,
+      clickStrategy:  '',
       buttonText:     '',
       timestamp:      Date.now(),
     };
@@ -633,6 +833,8 @@
     if (!editor) {
       result.error = 'Editor not found. Make sure you are on a Flow/Omni editor page.';
       console.warn('[OmniFlow][Generate] Editor not found.');
+      window.__omniflowGenerateInProgress = false;
+      generateLog('Generate lock released', 'warn');
       return result;
     }
     result.editorFound = true;
@@ -656,52 +858,154 @@
       if (!detected.includes(expected.substring(0, 40))) {
         result.error = 'Prompt verification failed: expected prompt text not found in editor DOM.';
         console.warn(`[OmniFlow][Generate] Verification failed. Expected: "${INJECT_TEXT}" Detected: "${detected}"`);
+        window.__omniflowGenerateInProgress = false;
+        generateLog('Generate lock released', 'warn');
         return result;
       }
 
       result.promptInjected = true;
-      console.log('[OmniFlow][Generate] Prompt injected and verified ✓');
+      generateLog('Prompt injected', 'ok');
     } catch (e) {
       result.error = `Prompt injection failed: ${e.message}`;
       console.error('[OmniFlow][Generate] Injection error:', e);
+      window.__omniflowGenerateInProgress = false;
+      generateLog('Generate lock released', 'error');
       return result;
     }
 
-    // ── Step 3: Find generate button ─────────────────────
-    console.log('[OmniFlow][Generate] Searching generate button…');
-    const { button, strategy, buttonText } = findGenerateButton();
+    // ── Step 3: Wait 500ms ────────────────────────────────
+    await new Promise(resolve => setTimeout(resolve, 500));
 
-    result.strategyUsed = strategy;
-    result.buttonText   = buttonText;
+    // ── Step 4: Locate button[aria-label="Send message"] ──
+    console.log('[OmniFlow][Generate] Searching generate button [aria-label="Send message"]…');
+    
+    // First query within composer container
+    const composerContainer = discoverComposerContainer(editor);
+    let button = null;
+    if (composerContainer) {
+      button = composerContainer.querySelector('button[aria-label="Send message"]');
+    }
+    
+    // Fallback: global query
+    if (!button) {
+      button = document.querySelector('button[aria-label="Send message"]');
+    }
+    
+    // Second fallback: findGenerateButton scorer logic
+    if (!button) {
+      const fb = findGenerateButton();
+      button = fb.button;
+      result.clickStrategy = fb.strategy;
+      result.buttonText = fb.buttonText;
+    } else {
+      result.clickStrategy = 'aria_label_send';
+      result.buttonText = button.textContent.trim() || button.getAttribute('aria-label') || 'Send message';
+    }
 
     if (!button) {
-      result.error = 'Generate button not found inside composer container.';
+      result.error = 'Send button not found.';
+      window.__omniflowGenerateInProgress = false;
+      generateLog('Generate lock released', 'warn');
       return result;
     }
     result.buttonFound = true;
-    console.log(`[OmniFlow][Generate] Button found via strategy: ${strategy} ✓`);
+    console.log('[OmniFlow][Generate] Send button found');
+    if (window.__omniflowGenState && window.__omniflowGenState.logs) {
+      window.__omniflowGenState.logs.push({ text: '[Generate] Send button found', type: 'info' });
+    }
 
-    // ── Step 4: Click ─────────────────────────────────────
-    console.log('[OmniFlow][Generate] Clicking button…');
+    // ── Step 5: Before click log ──────────────────────────
+    const activeBefore = document.activeElement;
+    const activeText = activeBefore ? `<${activeBefore.tagName.toLowerCase()}> id="${activeBefore.id}" class="${activeBefore.className}"` : 'none';
+    const rect = button.getBoundingClientRect();
+    
+    const clickDiagLogs = [
+      `Send button text: "${result.buttonText}"`,
+      `aria-label: "${button.getAttribute('aria-label') || 'none'}"`,
+      `disabled state: ${button.disabled}`,
+      `bounding box: left=${Math.round(rect.left)} right=${Math.round(rect.right)} top=${Math.round(rect.top)} bottom=${Math.round(rect.bottom)}`,
+      `activeElement: ${activeText}`
+    ];
+    
+    clickDiagLogs.forEach(line => {
+      console.log(`[OmniFlow][Generate] ${line}`);
+      if (window.__omniflowGenState && window.__omniflowGenState.logs) {
+        window.__omniflowGenState.logs.push({ text: `[Diag] ${line}`, type: 'info' });
+      }
+    });
+
+    // Helper to evaluate acceptance
+    function checkAcceptance() {
+      const textRemaining = readEditorText(editor).trim();
+      const isDisappeared = textRemaining.length === 0;
+      const isDisabled = button.disabled || button.getAttribute('aria-disabled') === 'true';
+      const genInfo = isPageGenerating();
+      const isGenerating = genInfo.generating;
+      
+      console.log(
+        `[OmniFlow][Generate] Acceptance check: ` +
+        `textRemainingLength=${textRemaining.length}, isButtonDisabled=${isDisabled}, currentlyGenerating=${isGenerating}`
+      );
+      
+      return isDisappeared || isDisabled || isGenerating;
+    }
+
+    // ── Step 6: Execute click sequence ────────────────────
+    // Execute Primary Click Strategy: focus() and single click()
+    console.log('[OmniFlow][Generate] Executing primary click…');
     try {
       button.focus();
       button.click();
-
-      // Fire pointer/mouse events for frameworks that intercept them
-      button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
-      button.dispatchEvent(new MouseEvent('mousedown',    { bubbles: true, cancelable: true }));
-      button.dispatchEvent(new MouseEvent('mouseup',      { bubbles: true, cancelable: true }));
-      button.dispatchEvent(new MouseEvent('click',        { bubbles: true, cancelable: true }));
-
       result.buttonClicked = true;
-      result.success       = true;
-      console.log('[OmniFlow][Generate] Generation trigger completed ✓');
-
-      // Start background state tracking
-      startGenerationMonitoring();
+      generateLog('Primary click executed', 'info');
     } catch (e) {
-      result.error = `Button click failed: ${e.message}`;
-      console.error('[OmniFlow][Generate] Click error:', e);
+      result.error = `Primary click failed: ${e.message}`;
+      console.error('[OmniFlow][Generate] Primary click error:', e);
+      window.__omniflowGenerateInProgress = false;
+      generateLog('Generate lock released', 'error');
+      return result;
+    }
+
+    // ── Step 7: Wait 2000ms ───────────────────────────────
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // ── Step 8: Check acceptance ──────────────────────────
+    let accepted = checkAcceptance();
+
+    // ── Step 9: Fallback click strategy ───────────────────
+    if (!accepted) {
+      console.log('[OmniFlow][Generate] Prompt not accepted after primary click. Attempting fallback MouseEvent click…');
+      try {
+        button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        generateLog('Fallback click executed', 'info');
+      } catch (e) {
+        console.error('[OmniFlow][Generate] Fallback click error:', e);
+      }
+      
+      // Wait another 1500ms
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // Check acceptance again
+      accepted = checkAcceptance();
+    }
+
+    // ── Step 10: Final Acceptance Evaluation ──────────────
+    if (accepted) {
+      result.promptAccepted = true;
+      result.success = true;
+      window.__omniflowGenState.promptAccepted = true;
+      generateLog('Prompt accepted', 'ok');
+
+      // Start background status tracking automatically
+      startGenerationMonitoring(button, editor);
+    } else {
+      result.error = 'Prompt did not seem to be accepted by Gemini (prompt remains in editor, button is active, and no generation indicators appeared).';
+      console.warn('[OmniFlow][Generate] Prompt not accepted after primary and fallback click attempts.');
+      generateLog('Prompt not accepted', 'warn');
+      
+      // Release generate lock since it was never accepted
+      window.__omniflowGenerateInProgress = false;
+      generateLog('Generate lock released', 'warn');
     }
 
     return result;
@@ -748,19 +1052,40 @@
     // ── OMNIFLOW_GENERATE (Phase 2) ───────────────────────
     if (message.type === 'OMNIFLOW_GENERATE') {
       console.log('[OmniFlow][Generate] Received OMNIFLOW_GENERATE.');
-      try {
-        const result = performGenerate();
-        console.log('[OmniFlow][Generate] Sending generate result:', result);
-        sendResponse(result);
-      } catch (err) {
-        console.error('[OmniFlow][Generate] Error:', err);
-        sendResponse({
-          success: false, editorFound: false, promptInjected: false,
-          buttonFound: false, buttonClicked: false,
-          error: `Unexpected error: ${err.message}`,
-          timestamp: Date.now(),
-        });
+      (async () => {
+        try {
+          const result = await performGenerate();
+          console.log('[OmniFlow][Generate] Sending generate result:', result);
+          sendResponse(result);
+        } catch (err) {
+          console.error('[OmniFlow][Generate] Error:', err);
+          sendResponse({
+            success: false, editorFound: false, promptInjected: false,
+            buttonFound: false, buttonClicked: false, promptAccepted: false,
+            error: `Unexpected error: ${err.message}`,
+            timestamp: Date.now(),
+          });
+        }
+      })();
+      return true;
+    }
+
+    // ── OMNIFLOW_RESET (Phase 4.1 Lock Reset) ──────────────
+    if (message.type === 'OMNIFLOW_RESET') {
+      console.log('[OmniFlow][Generate] Received OMNIFLOW_RESET message.');
+      window.__omniflowGenerateInProgress = false;
+      if (window.__omniflowGenState) {
+        window.__omniflowGenState.status = 'waiting';
+        window.__omniflowGenState.promptAccepted = false;
+        window.__omniflowGenState.generationStarted = false;
+        window.__omniflowGenState.generationCompleted = false;
+        if (window.__omniflowGenState.checkIntervalId) {
+          clearInterval(window.__omniflowGenState.checkIntervalId);
+          window.__omniflowGenState.checkIntervalId = null;
+        }
       }
+      generateLog('Generate lock released', 'info');
+      sendResponse({ success: true });
       return true;
     }
 
@@ -784,12 +1109,19 @@
 
     // ── OMNIFLOW_GET_STATUS (Phase 3.1) ───────────────────
     if (message.type === 'OMNIFLOW_GET_STATUS') {
-      const state = window.__omniflowGenState || { status: 'waiting', startTime: null };
+      const state = window.__omniflowGenState || { status: 'waiting', startTime: null, logs: [], promptAccepted: false, generationStarted: false, generationCompleted: false };
       const elapsedSeconds = state.startTime ? Math.round((Date.now() - state.startTime) / 1000) : 0;
+      
+      const logsToSend = state.logs || [];
+      state.logs = []; // Consume/clear retrieved logs to avoid repeats
       
       sendResponse({
         status: state.status,
-        elapsedSeconds: elapsedSeconds
+        elapsedSeconds: elapsedSeconds,
+        logs: logsToSend,
+        promptAccepted: state.promptAccepted,
+        generationStarted: state.generationStarted,
+        generationCompleted: state.generationCompleted
       });
       return true;
     }

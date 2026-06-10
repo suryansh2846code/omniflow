@@ -35,6 +35,9 @@ const genEditorFound   = document.getElementById('genEditorFound');
 const genPromptInjected = document.getElementById('genPromptInjected');
 const genButtonFound   = document.getElementById('genButtonFound');
 const genButtonClicked = document.getElementById('genButtonClicked');
+const genPromptAccepted = document.getElementById('genPromptAccepted');
+const genGenerationStarted = document.getElementById('genGenerationStarted');
+const genGenerationCompleted = document.getElementById('genGenerationCompleted');
 const genStrategy      = document.getElementById('genStrategy');
 const genButtonText    = document.getElementById('genButtonText');
 
@@ -149,6 +152,9 @@ function renderGenerateResult(r) {
   setGenBool(genPromptInjected, r.promptInjected, '', '');
   setGenBool(genButtonFound,    r.buttonFound,    '', '');
   setGenBool(genButtonClicked,  r.buttonClicked,  '', '');
+  setGenBool(genPromptAccepted, r.promptAccepted,  '', '');
+  setGenBool(genGenerationStarted, false,          '', '');
+  setGenBool(genGenerationCompleted, false,        '', '');
 
   // Strategy
   genStrategy.className = 'gen-row-val';
@@ -161,11 +167,14 @@ function renderGenerateResult(r) {
 
 function hideGeneratePanel() {
   generatePanel.classList.remove('visible');
-  [genEditorFound, genPromptInjected, genButtonFound, genButtonClicked, genStrategy, genButtonText]
-    .forEach(el => {
-      el.className = 'gen-row-val';
-      el.textContent = '—';
-    });
+  [
+    genEditorFound, genPromptInjected, genButtonFound, genButtonClicked,
+    genPromptAccepted, genGenerationStarted, genGenerationCompleted,
+    genStrategy, genButtonText
+  ].forEach(el => {
+    el.className = 'gen-row-val';
+    el.textContent = '—';
+  });
 }
 
 /**
@@ -258,6 +267,11 @@ function updateStatusPanel(s) {
   }
   
   statusTimerVal.textContent = `${s.elapsedSeconds || 0}s`;
+
+  // Update generation test diagnostic badges
+  setGenBool(genPromptAccepted, s.promptAccepted !== undefined ? s.promptAccepted : null, '', '');
+  setGenBool(genGenerationStarted, s.generationStarted !== undefined ? s.generationStarted : null, '', '');
+  setGenBool(genGenerationCompleted, s.generationCompleted !== undefined ? s.generationCompleted : null, '', '');
 }
 
 function hideStatusPanel() {
@@ -296,11 +310,15 @@ function startStatusPolling(tabId) {
         return;
       }
 
-      updateStatusPanel(status);
+      if (status.logs && status.logs.length > 0) {
+        status.logs.forEach(l => {
+          log(l.text, l.type || 'info');
+        });
+      }
 
-      if (status.status === 'generating') {
-        log('[Popup] Generation in progress', 'info');
-      } else if (status.status === 'no_gen_detected') {
+      updateStatusPanel(status);
+      
+      if (status.status === 'no_gen_detected') {
         log('[Popup] Generation aborted: No generation detected within 15 seconds.', 'warn');
         showError('No generation detected. Check if prompt was sent.');
         clearInterval(statusPollIntervalId);
@@ -675,6 +693,16 @@ if (generateBtn) {
         return;
       }
 
+      // Send OMNIFLOW_RESET to release any pre-existing lock/status state on the tab
+      try {
+        log('[Popup] Sending OMNIFLOW_RESET to tab…', 'info');
+        await chrome.tabs.sendMessage(tab.id, { type: 'OMNIFLOW_RESET' });
+        log('[Popup] OMNIFLOW_RESET completed.', 'ok');
+      } catch (resetErr) {
+        // Log a warning, but don't abort, since it could be a transient message issue or a clean slate
+        log(`[Popup] OMNIFLOW_RESET warning: ${resetErr.message}`, 'warn');
+      }
+
       // 3. Send OMNIFLOW_GENERATE
       log('[Popup] Sending OMNIFLOW_GENERATE to content script…', 'info');
       let result;
@@ -691,7 +719,7 @@ if (generateBtn) {
       log(`[Popup] GENERATE result received. success=${result.success}`, result.success ? 'ok' : 'warn');
       log(`[Popup] editorFound=${result.editorFound}, promptInjected=${result.promptInjected}`, 'info');
       log(`[Popup] buttonFound=${result.buttonFound}, buttonClicked=${result.buttonClicked}`, 'info');
-      if (result.strategyUsed) log(`[Popup] Strategy used: ${result.strategyUsed}`, 'ok');
+      if (result.clickStrategy || result.strategyUsed) log(`[Popup] Strategy used: ${result.clickStrategy || result.strategyUsed}`, 'ok');
       if (result.error)        log(`[Popup] Error: ${result.error}`, 'error');
 
       renderGenerateResult(result);

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "OmniFlow",
-  "version": "0.2.2",
-  "description": "Phase 2.2 — Composer Inspector for DOM button discovery and targeting.",
+  "version": "0.3.0",
+  "description": "Phase 4 — End-to-End Generate Validation.",
 
   "action": {
     "default_popup": "popup.html",
