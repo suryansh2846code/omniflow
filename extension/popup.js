@@ -21,6 +21,13 @@ const logToggle       = document.getElementById('logToggle');
 const toggleArrow     = document.getElementById('toggleArrow');
 const logBox          = document.getElementById('logBox');
 
+// Phase 1 refs
+const injectBtn       = document.getElementById('injectBtn');
+const injectPanel     = document.getElementById('injectPanel');
+const injectBadge     = document.getElementById('injectBadge');
+const injectTextRow   = document.getElementById('injectTextRow');
+const injectTextValue = document.getElementById('injectTextValue');
+
 // ── Log helpers ───────────────────────────────────────────
 /**
  * Append a line to the diagnostic log panel.
@@ -60,6 +67,31 @@ function clearError() {
 
 function setCardValue(el, value) {
   el.textContent = value;
+}
+
+// ── Injection result helpers ────────────────────────────
+/**
+ * Show the injection result panel.
+ * @param {'success'|'failed'} status
+ * @param {string} detectedText
+ */
+function showInjectResult(status, detectedText) {
+  injectPanel.classList.add('visible');
+
+  // Reset badge classes
+  injectBadge.className = 'inject-badge';
+  injectBadge.classList.add(status);
+  injectBadge.textContent = status === 'success' ? '✓ SUCCESS' : '✗ FAILED';
+
+  injectTextValue.textContent = detectedText || '';
+  injectTextRow.style.display = detectedText ? 'flex' : 'none';
+}
+
+function hideInjectPanel() {
+  injectPanel.classList.remove('visible');
+  injectBadge.className = 'inject-badge';
+  injectBadge.textContent = '';
+  injectTextValue.textContent = '';
 }
 
 function revealCards() {
@@ -242,6 +274,86 @@ testBtn.addEventListener('click', async () => {
   }
 });
 
+// ── Phase 1: inject button click ──────────────────────────
+if (injectBtn) {
+  injectBtn.addEventListener('click', async () => {
+    clearError();
+    hideInjectPanel();
+
+    injectBtn.disabled = true;
+    testBtn.disabled = true;
+    setStatus('running');
+    log('[Popup] Test Prompt Injection clicked.', 'info');
+
+    try {
+      // 1. Get active tab
+      log('[Popup] Querying active tab…', 'info');
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+      if (!tab) {
+        showError('No active tab found.');
+        return;
+      }
+
+      log(`[Popup] Active tab: ${tab.url}`, 'info');
+
+      const restrictedPrefixes = ['chrome://', 'chrome-extension://', 'about:', 'edge://', 'brave://'];
+      if (restrictedPrefixes.some(p => tab.url?.startsWith(p))) {
+        showError('Cannot access browser internal pages.');
+        return;
+      }
+
+      // 2. (Re-)inject content.js
+      log('[Popup] Injecting content.js…', 'info');
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: ['content.js']
+        });
+        log('[Popup] content.js injected.', 'ok');
+      } catch (injectErr) {
+        showError(`Injection failed: ${injectErr.message}`);
+        return;
+      }
+
+      // 3. Send OMNIFLOW_INJECT command
+      log('[Popup] Sending OMNIFLOW_INJECT to content script…', 'info');
+      let result;
+      try {
+        result = await chrome.tabs.sendMessage(tab.id, {
+          type: 'OMNIFLOW_INJECT',
+          text: 'Hello from OmniFlow',
+        });
+      } catch (msgErr) {
+        showError(`Could not reach content script: ${msgErr.message}`);
+        return;
+      }
+
+      if (!result) {
+        showError('Content script returned no data.');
+        return;
+      }
+
+      // 4. Render result
+      if (result.success) {
+        log(`[Popup] Injection SUCCESS. Detected text: "${result.text}"`, 'ok');
+        showInjectResult('success', result.text);
+        setStatus('success');
+      } else {
+        log(`[Popup] Injection FAILED. Reason: ${result.error || 'unknown'}`, 'error');
+        showInjectResult('failed', result.text || '');
+        showError(result.error || 'Injection failed — editor not found or text mismatch.');
+      }
+
+    } catch (err) {
+      showError(`Unexpected error: ${err.message}`);
+    } finally {
+      injectBtn.disabled = false;
+      testBtn.disabled = false;
+    }
+  });
+}
+
 // ── Log toggle ────────────────────────────────────────────
 logToggle.addEventListener('click', () => {
   const isOpen = logBox.classList.toggle('open');
@@ -251,4 +363,4 @@ logToggle.addEventListener('click', () => {
 });
 
 // ── Boot log ──────────────────────────────────────────────
-log('[Popup] OmniFlow Phase 0 popup loaded.', 'ok');
+log('[Popup] OmniFlow Phase 1 popup loaded.', 'ok');

@@ -117,6 +117,9 @@ html, body {
 /* ─── Action Button ─────────────────────────────────────── */
 .action-section {
   padding: 14px 16px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .btn-primary {
@@ -158,6 +161,42 @@ html, body {
 
 .btn-icon {
   font-size: 15px;
+}
+
+/* Secondary (injection) button */
+.btn-secondary {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  color: var(--accent-light);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.1s ease, box-shadow 0.2s ease;
+  letter-spacing: 0.1px;
+}
+
+.btn-secondary:hover {
+  background: var(--accent-glow);
+  box-shadow: 0 4px 14px var(--accent-glow);
+  transform: translateY(-1px);
+}
+
+.btn-secondary:active {
+  transform: translateY(0);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
 }
 
 /* ─── Results ───────────────────────────────────────────── */
@@ -340,6 +379,85 @@ html, body {
 .error-banner.visible {
   display: flex;
   animation: fadeIn 0.2s ease;
+}
+
+/* ─── Injection Panel ───────────────────────────────── */
+.inject-panel {
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  animation: fadeIn 0.25s ease;
+}
+
+.inject-panel.visible {
+  display: flex;
+}
+
+.inject-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.inject-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+}
+
+.inject-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.inject-badge.success {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--success);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.inject-badge.failed {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--error);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.inject-text-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.inject-text-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  min-width: 80px;
+}
+
+.inject-text-value {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  word-break: break-all;
 }
 
 @keyframes fadeIn {
