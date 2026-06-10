@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "OmniFlow",
+  "version": "0.1.0",
+  "description": "Phase 0 — Validates that OmniFlow can inspect and understand the Omni webpage.",
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "OmniFlow"
+  },
+
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
+
+  "host_permissions": [
+    "<all_urls>"
+  ]
+}

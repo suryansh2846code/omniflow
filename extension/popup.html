@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OmniFlow</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+
+  <!-- ── Header ─────────────────────────────────────────── -->
+  <header class="header">
+    <div class="logo">
+      <div class="logo-icon">⚡</div>
+      <div class="logo-text">
+        <h1 class="title">OmniFlow</h1>
+        <span class="subtitle">Phase 0 · Omni Access Test</span>
+      </div>
+    </div>
+    <div class="status-dot" id="statusDot" title="Idle"></div>
+  </header>
+
+  <!-- ── Action Button ──────────────────────────────────── -->
+  <section class="action-section">
+    <button id="testBtn" class="btn-primary">
+      <span class="btn-icon">🔍</span>
+      <span class="btn-label">Test Omni</span>
+    </button>
+  </section>
+
+  <!-- ── Results Panel ──────────────────────────────────── -->
+  <section class="results-section" id="resultsSection" aria-live="polite">
+
+    <!-- Summary cards -->
+    <div class="cards" id="summaryCards">
+      <div class="card" id="cardUrl">
+        <span class="card-label">URL</span>
+        <span class="card-value" id="valUrl">—</span>
+      </div>
+      <div class="card" id="cardTitle">
+        <span class="card-label">Page</span>
+        <span class="card-value" id="valTitle">—</span>
+      </div>
+      <div class="card" id="cardCount">
+        <span class="card-label">Prompt Candidates</span>
+        <span class="card-value" id="valCount">—</span>
+      </div>
+    </div>
+
+    <!-- Candidate list -->
+    <div class="candidates-wrap" id="candidatesWrap">
+      <h2 class="section-heading" id="candidatesHeading">Candidates</h2>
+      <ul class="candidates-list" id="candidatesList" aria-label="Prompt field candidates"></ul>
+    </div>
+
+    <!-- Error banner -->
+    <div class="error-banner" id="errorBanner" role="alert" aria-hidden="true">
+      <span class="error-icon">⚠️</span>
+      <span id="errorMsg"></span>
+    </div>
+
+  </section>
+
+  <!-- ── Diagnostic Log ─────────────────────────────────── -->
+  <section class="log-section">
+    <button class="log-toggle" id="logToggle" aria-expanded="false" aria-controls="logBox">
+      <span>Diagnostic Log</span>
+      <span class="toggle-arrow" id="toggleArrow">▶</span>
+    </button>
+    <div class="log-box" id="logBox" aria-hidden="true"></div>
+  </section>
+
+  <script src="popup.js"></script>
+</body>
+</html>
