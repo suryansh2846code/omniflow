@@ -38,6 +38,14 @@ const genButtonClicked = document.getElementById('genButtonClicked');
 const genStrategy      = document.getElementById('genStrategy');
 const genButtonText    = document.getElementById('genButtonText');
 
+// Phase 2.2 refs
+const inspectBtn           = document.getElementById('inspectBtn');
+const composerInspectPanel = document.getElementById('composerInspectPanel');
+const inspectComposerFound = document.getElementById('inspectComposerFound');
+const inspectButtonsFound  = document.getElementById('inspectButtonsFound');
+const inspectButtonsWrap   = document.getElementById('inspectButtonsWrap');
+const inspectButtonsList   = document.getElementById('inspectButtonsList');
+
 // ── Log helpers ───────────────────────────────────────────
 /**
  * Append a line to the diagnostic log panel.
@@ -152,6 +160,62 @@ function hideGeneratePanel() {
     });
 }
 
+/**
+ * Render the results of the Composer Inspection in the popup.
+ * @param {Object} r - OMNIFLOW_INSPECT_COMPOSER response
+ */
+function renderInspectResult(r) {
+  composerInspectPanel.classList.add('visible');
+  setGenBool(inspectComposerFound, r.composerFound, '', '');
+  
+  if (r.composerFound) {
+    inspectButtonsFound.className = 'inspect-row-val val-true';
+    inspectButtonsFound.textContent = r.buttonsCount || '0';
+    
+    inspectButtonsList.innerHTML = '';
+    if (r.buttons && r.buttons.length > 0) {
+      inspectButtonsWrap.style.display = 'flex';
+      r.buttons.forEach((btn) => {
+        const li = document.createElement('li');
+        li.className = 'inspect-button-item';
+        
+        const coords = `L:${btn.left} R:${btn.right} T:${btn.top} B:${btn.bottom}`;
+        const attrs = [
+          btn.role ? `role="${btn.role}"` : '',
+          btn.disabled ? 'disabled' : 'enabled'
+        ].filter(Boolean).join(' | ');
+
+        li.innerHTML = `
+          <div class="inspect-btn-title">
+            <span class="inspect-btn-name">#${btn.index} "${btn.text}"</span>
+            <span class="inspect-btn-tag">&lt;button&gt;</span>
+          </div>
+          <div class="inspect-btn-coords">${coords}</div>
+          <div class="inspect-btn-attrs">${attrs}</div>
+        `;
+        inspectButtonsList.appendChild(li);
+      });
+    } else {
+      inspectButtonsWrap.style.display = 'none';
+    }
+  } else {
+    inspectButtonsFound.className = 'inspect-row-val';
+    inspectButtonsFound.textContent = '—';
+    inspectButtonsWrap.style.display = 'none';
+    inspectButtonsList.innerHTML = '';
+  }
+}
+
+function hideInspectPanel() {
+  composerInspectPanel.classList.remove('visible');
+  inspectComposerFound.className = 'inspect-row-val';
+  inspectComposerFound.textContent = '—';
+  inspectButtonsFound.className = 'inspect-row-val';
+  inspectButtonsFound.textContent = '—';
+  inspectButtonsWrap.style.display = 'none';
+  inspectButtonsList.innerHTML = '';
+}
+
 function revealCards() {
   [cardUrl, cardTitle, cardCount].forEach((card, i) => {
     setTimeout(() => card.classList.add('visible'), i * 60);
@@ -237,10 +301,12 @@ function renderCandidates(candidates) {
   });
 }
 
-// ── Main: handle test button click ───────────────────────
 testBtn.addEventListener('click', async () => {
   // Reset UI
   clearError();
+  hideInjectPanel();
+  hideGeneratePanel();
+  hideInspectPanel();
   candidatesWrap.classList.remove('visible');
   candidatesList.innerHTML = '';
   [cardUrl, cardTitle, cardCount].forEach(c => c.classList.remove('visible'));
@@ -249,6 +315,9 @@ testBtn.addEventListener('click', async () => {
   setCardValue(valCount, '—');
 
   testBtn.disabled = true;
+  if (injectBtn) injectBtn.disabled = true;
+  if (generateBtn) generateBtn.disabled = true;
+  if (inspectBtn) inspectBtn.disabled = true;
   setStatus('running');
   log('[Popup] Test Omni clicked.', 'info');
 
@@ -329,17 +398,23 @@ testBtn.addEventListener('click', async () => {
     showError(`Unexpected error: ${err.message}`);
   } finally {
     testBtn.disabled = false;
+    if (injectBtn) injectBtn.disabled = false;
+    if (generateBtn) generateBtn.disabled = false;
+    if (inspectBtn) inspectBtn.disabled = false;
   }
 });
 
-// ── Phase 1: inject button click ──────────────────────────
 if (injectBtn) {
   injectBtn.addEventListener('click', async () => {
     clearError();
     hideInjectPanel();
+    hideGeneratePanel();
+    hideInspectPanel();
 
     injectBtn.disabled = true;
     testBtn.disabled = true;
+    if (generateBtn) generateBtn.disabled = true;
+    if (inspectBtn) inspectBtn.disabled = true;
     setStatus('running');
     log('[Popup] Test Prompt Injection clicked.', 'info');
 
@@ -408,19 +483,23 @@ if (injectBtn) {
     } finally {
       injectBtn.disabled = false;
       testBtn.disabled = false;
+      if (generateBtn) generateBtn.disabled = false;
+      if (inspectBtn) inspectBtn.disabled = false;
     }
   });
 }
 
-// ── Phase 2: generate button click ────────────────────────
 if (generateBtn) {
   generateBtn.addEventListener('click', async () => {
     clearError();
     hideGeneratePanel();
+    hideInjectPanel();
+    hideInspectPanel();
 
     generateBtn.disabled = true;
     injectBtn.disabled   = true;
     testBtn.disabled     = true;
+    if (inspectBtn) inspectBtn.disabled = true;
     setStatus('running');
     log('[Popup] Test Generate Click clicked.', 'info');
 
@@ -478,6 +557,89 @@ if (generateBtn) {
     } catch (err) {
       showError(`Unexpected error: ${err.message}`);
     } finally {
+      generateBtn.disabled = false;
+      injectBtn.disabled   = false;
+      testBtn.disabled     = false;
+      if (inspectBtn) inspectBtn.disabled = false;
+    }
+  });
+}
+
+// ── Phase 2.2: inspect button click ───────────────────────
+if (inspectBtn) {
+  inspectBtn.addEventListener('click', async () => {
+    clearError();
+    hideInspectPanel();
+    hideInjectPanel();
+    hideGeneratePanel();
+
+    inspectBtn.disabled  = true;
+    generateBtn.disabled = true;
+    injectBtn.disabled   = true;
+    testBtn.disabled     = true;
+    setStatus('running');
+    log('[Popup] Test Inspect Composer clicked.', 'info');
+
+    try {
+      // 1. Get active tab
+      log('[Popup] Querying active tab…', 'info');
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+      if (!tab) { showError('No active tab found.'); return; }
+
+      log(`[Popup] Active tab: ${tab.url}`, 'info');
+
+      const restrictedPrefixes = ['chrome://', 'chrome-extension://', 'about:', 'edge://', 'brave://'];
+      if (restrictedPrefixes.some(p => tab.url?.startsWith(p))) {
+        showError('Cannot access browser internal pages.');
+        return;
+      }
+
+      // 2. Inject content.js
+      log('[Popup] Injecting content.js…', 'info');
+      try {
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+        log('[Popup] content.js injected.', 'ok');
+      } catch (injectErr) {
+        showError(`Injection failed: ${injectErr.message}`);
+        return;
+      }
+
+      // 3. Send OMNIFLOW_INSPECT_COMPOSER
+      log('[Popup] Sending OMNIFLOW_INSPECT_COMPOSER to content script…', 'info');
+      let result;
+      try {
+        result = await chrome.tabs.sendMessage(tab.id, { type: 'OMNIFLOW_INSPECT_COMPOSER' });
+      } catch (msgErr) {
+        showError(`Could not reach content script: ${msgErr.message}`);
+        return;
+      }
+
+      if (!result) { showError('Content script returned no data.'); return; }
+
+      // 4. Render result
+      log(`[Popup] INSPECT result received. success=${result.success}`, result.success ? 'ok' : 'warn');
+      if (result.error) log(`[Popup] Error: ${result.error}`, 'error');
+
+      // Log composer buttons to diagnostic log
+      if (result.success && result.buttons) {
+        log(`[Popup] Composer selected`, 'ok');
+        result.buttons.forEach((btn) => {
+          log(`[Popup] Button #${btn.index} text="${btn.text}"`, 'info');
+        });
+      }
+
+      renderInspectResult(result);
+      setStatus(result.success ? 'success' : 'error');
+
+      if (!result.success) {
+        showError(result.error || 'Composer inspection failed.');
+      }
+
+    } catch (err) {
+      showError(`Unexpected error: ${err.message}`);
+    } finally {
+      inspectBtn.disabled  = false;
       generateBtn.disabled = false;
       injectBtn.disabled   = false;
       testBtn.disabled     = false;

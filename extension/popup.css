@@ -237,6 +237,44 @@ html, body {
   transform: none;
 }
 
+/* Inspect button — violet gradient */
+.btn-inspect {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #a855f7, #c084fc);
+  border: none;
+  border-radius: var(--radius-md);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.1s ease, box-shadow 0.2s ease;
+  box-shadow: 0 4px 14px rgba(168, 85, 247, 0.25);
+  letter-spacing: 0.1px;
+}
+
+.btn-inspect:hover {
+  opacity: 0.9;
+  box-shadow: 0 6px 20px rgba(168, 85, 247, 0.35);
+  transform: translateY(-1px);
+}
+
+.btn-inspect:active {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.btn-inspect:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
 /* ─── Results ───────────────────────────────────────────── */
 .results-section {
   padding: 0 16px 4px;
@@ -595,6 +633,168 @@ html, body {
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-weight: 700;
   text-transform: none;
+}
+
+/* ─── Composer Inspector Panel ───────────────────────── */
+.inspect-panel {
+  display: none;
+  flex-direction: column;
+  gap: 0;
+  margin-bottom: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  animation: fadeIn 0.25s ease;
+}
+
+.inspect-panel.visible {
+  display: flex;
+}
+
+.inspect-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px 8px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(90deg, rgba(168, 85, 247, 0.08), transparent);
+}
+
+.inspect-panel-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: #c084fc;
+}
+
+.inspect-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.inspect-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 12px;
+  border-bottom: 1px solid rgba(46, 51, 77, 0.5);
+  transition: background 0.15s ease;
+}
+
+.inspect-row:last-child {
+  border-bottom: none;
+}
+
+.inspect-row:hover {
+  background: rgba(168, 85, 247, 0.04);
+}
+
+.inspect-row-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.inspect-row-val {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-subtle);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.inspect-row-val.val-true {
+  color: var(--success);
+}
+
+.inspect-row-val.val-true::before {
+  content: '✓ ';
+}
+
+.inspect-row-val.val-false {
+  color: var(--error);
+}
+
+.inspect-row-val.val-false::before {
+  content: '✗ ';
+}
+
+.inspect-buttons-wrap {
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inspect-list-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+}
+
+.inspect-buttons-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 150px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.inspect-buttons-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.inspect-buttons-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.inspect-buttons-list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
+.inspect-button-item {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  animation: slideIn 0.2s ease forwards;
+}
+
+.inspect-btn-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  justify-content: space-between;
+}
+
+.inspect-btn-tag {
+  color: #c084fc;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 10px;
+}
+
+.inspect-btn-coords {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.inspect-btn-attrs {
+  font-size: 10px;
+  color: var(--text-subtle);
+  display: flex;
+  gap: 8px;
 }
 
 @keyframes fadeIn {

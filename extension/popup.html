@@ -34,6 +34,10 @@
       <span class="btn-icon">🚀</span>
       <span class="btn-label">Test Generate Click</span>
     </button>
+    <button id="inspectBtn" class="btn-inspect">
+      <span class="btn-icon">🔬</span>
+      <span class="btn-label">Inspect Composer</span>
+    </button>
   </section>
 
   <!-- ── Results Panel ──────────────────────────────────── -->
@@ -97,6 +101,27 @@
           <span class="gen-row-label">Button Text</span>
           <span class="gen-row-val" id="genButtonText">—</span>
         </div>
+      </div>
+    </div>
+
+    <!-- Composer Inspector panel -->
+    <div class="inspect-panel" id="composerInspectPanel" aria-live="polite">
+      <div class="inspect-panel-header">
+        <span class="inspect-panel-title">Composer Inspector</span>
+      </div>
+      <div class="inspect-rows">
+        <div class="inspect-row">
+          <span class="inspect-row-label">Composer Found</span>
+          <span class="inspect-row-val" id="inspectComposerFound">—</span>
+        </div>
+        <div class="inspect-row">
+          <span class="inspect-row-label">Buttons Found</span>
+          <span class="inspect-row-val" id="inspectButtonsFound">—</span>
+        </div>
+      </div>
+      <div class="inspect-buttons-wrap" id="inspectButtonsWrap">
+        <span class="inspect-list-label">Buttons List:</span>
+        <ul class="inspect-buttons-list" id="inspectButtonsList"></ul>
       </div>
     </div>
 

@@ -295,51 +295,157 @@
   }
 
   /**
-   * Find the generate button using a composer-scoped approach:
+   * Walk upward through multiple ancestors from the Slate editor.
+   * Inspects each ancestor, counts usable buttons, and returns
+   * the largest ancestor representing the prompt composer region.
    *
-   *  1. Locate the Slate prompt editor.
-   *  2. Walk upward through the DOM to find the tightest ancestor
-   *     ("composer container") that contains at least one usable button.
-   *     STOP there — never search beyond this container.
-   *  3. Collect all usable buttons inside the composer only.
-   *  4. Log every candidate before choosing.
-   *  5. Choose the rightmost keyword-matching button (keyword_rightmost).
-   *  6. If no keyword match, choose the rightmost button in the composer
-   *     (container_rightmost). No global page scanning. No last-resort fallback.
+   * @param {Element} editor
+   * @returns {Element|null}
+   */
+  function discoverComposerContainer(editor) {
+    if (!editor) return null;
+
+    const ancestors = [];
+    let ancestor = editor.parentElement;
+    let level = 1;
+
+    console.log('[OmniFlow][Inspect] Editor found');
+
+    while (ancestor && ancestor !== document.body && ancestor !== document.documentElement && level <= 15) {
+      const buttons = Array.from(
+        ancestor.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"]')
+      ).filter(isButtonUsable);
+
+      const rect = ancestor.getBoundingClientRect();
+      console.log(`[OmniFlow][Inspect] Ancestor level ${level} -> ${buttons.length} buttons`);
+
+      ancestors.push({
+        element: ancestor,
+        level,
+        buttons,
+        rect
+      });
+
+      ancestor = ancestor.parentElement;
+      level++;
+    }
+
+    // Largest ancestor representing prompt composer region
+    // Constraint: height <= 350px or 45% of viewport
+    const maxH = Math.max(350, window.innerHeight * 0.45);
+    const candidates = ancestors.filter(ans => {
+      return ans.buttons.length > 0 && ans.rect.height <= maxH;
+    });
+
+    let chosen = null;
+    if (candidates.length > 0) {
+      // Sort descending by level (highest ancestor first)
+      candidates.sort((a, b) => b.level - a.level);
+      chosen = candidates[0];
+    } else if (ancestors.length > 0) {
+      // Fallback: first ancestor with buttons
+      chosen = ancestors.find(ans => ans.buttons.length > 0) || null;
+    }
+
+    if (chosen) {
+      console.log('[OmniFlow][Inspect] Composer selected');
+    }
+
+    return chosen ? chosen.element : null;
+  }
+
+  /**
+   * Scans the editor's composer area and lists all buttons inside it.
+   * Does not click anything.
+   *
+   * @returns {Object} inspect result
+   */
+  function performInspectComposer() {
+    const editor = findEditor();
+    if (!editor) {
+      return { success: false, error: 'Editor not found. Make sure you are on a Flow/Omni editor page.' };
+    }
+
+    const composerContainer = discoverComposerContainer(editor);
+    if (!composerContainer) {
+      return { success: false, editorFound: true, error: 'Composer container not found.' };
+    }
+
+    // Collect ALL buttons inside composer container (no filter!)
+    const allButtons = Array.from(
+      composerContainer.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"]')
+    );
+
+    const buttons = allButtons.map((btn, i) => {
+      const text = (btn.textContent || btn.value || btn.getAttribute('aria-label') || '').trim();
+      const rect = btn.getBoundingClientRect();
+      const btnInfo = {
+        index: i + 1,
+        text: text || '(no text)',
+        ariaLabel: btn.getAttribute('aria-label') || '',
+        role: btn.getAttribute('role') || '',
+        disabled: btn.disabled || btn.getAttribute('aria-disabled') === 'true',
+        left: Math.round(rect.left),
+        right: Math.round(rect.right),
+        top: Math.round(rect.top),
+        bottom: Math.round(rect.bottom)
+      };
+
+      console.log(`[OmniFlow][Inspect] Button #${btnInfo.index}`);
+      console.log(`text="${btnInfo.text}"`);
+
+      return btnInfo;
+    });
+
+    return {
+      success: true,
+      editorFound: true,
+      composerFound: true,
+      buttonsCount: buttons.length,
+      buttons
+    };
+  }
+
+  /**
+   * Future Strategy #1 Button filtering logic (prepared for Phase 3/future activation).
+   * It only allows specific keywords and explicitly rejects utility/mode buttons.
+   *
+   * @param {Element[]} buttons
+   * @returns {Element[]}
+   */
+  function futureStrategyButtonFilter(buttons) {
+    const ALLOWED = ['arrow_forward', 'generate', 'submit', 'send'];
+    const REJECTED = ['create', 'agent', 'video', 'settings', 'more'];
+
+    return buttons.filter(btn => {
+      const text = (
+        btn.textContent || btn.value || btn.getAttribute('aria-label') || ''
+      ).trim().toLowerCase();
+
+      const isAllowed = ALLOWED.some(label => text.includes(label));
+      const isRejected = REJECTED.some(label => text.includes(label));
+
+      return isAllowed && !isRejected;
+    });
+  }
+
+  /**
+   * Find the generate button using the new composer discovery logic.
    *
    * @returns {{ button: Element|null, strategy: string, buttonText: string }}
    */
   function findGenerateButton() {
     console.log('[OmniFlow][Generate] Searching for generate button inside composer…');
 
-    // ── Step 1: Locate the editor ─────────────────────────
     const editor = findEditor();
     if (!editor) {
       console.warn('[OmniFlow][Generate] Cannot find generate button — editor not found.');
       return { button: null, strategy: 'none', buttonText: '' };
     }
 
-    // ── Step 2: Walk up to the composer container ─────────
-    // The composer container is the tightest ancestor that holds
-    // at least one usable button. We stop at the first such ancestor
-    // and never go wider — buttons outside it are never considered.
-    let composerContainer = null;
-    let ancestor = editor.parentElement;
-
-    while (ancestor && ancestor !== document.body) {
-      const buttonsInAncestor = Array.from(
-        ancestor.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"]')
-      ).filter(isButtonUsable);
-
-      if (buttonsInAncestor.length > 0) {
-        composerContainer = ancestor;
-        break;
-      }
-      ancestor = ancestor.parentElement;
-    }
-
+    const composerContainer = discoverComposerContainer(editor);
     if (!composerContainer) {
-      console.warn('[OmniFlow][Generate] No composer container with usable buttons found.');
+      console.warn('[OmniFlow][Generate] No composer container found.');
       return { button: null, strategy: 'none', buttonText: '' };
     }
 
@@ -348,12 +454,11 @@
       `class="${composerContainer.className}"`
     );
 
-    // ── Step 3: Collect all usable buttons inside composer ─
+    // Collect all usable buttons inside composer
     const composerButtons = Array.from(
       composerContainer.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"]')
     ).filter(isButtonUsable);
 
-    // ── Step 4: Log every candidate before choosing ───────
     console.log(`[OmniFlow][Generate] ${composerButtons.length} usable button(s) inside composer:`);
     composerButtons.forEach((btn, i) => {
       const txt  = btn.textContent.trim() || btn.getAttribute('aria-label') || btn.getAttribute('type') || '(no text)';
@@ -366,7 +471,7 @@
       );
     });
 
-    // ── Step 5: Prefer keyword-matching button (rightmost) ─
+    // Prefer keyword-matching button (rightmost)
     const GENERATE_LABELS = [
       'arrow_forward', 'generate', 'create', 'submit', 'run', 'send', 'go',
     ];
@@ -386,8 +491,7 @@
       return { button: btn, strategy: 'keyword_rightmost', buttonText: displayText };
     }
 
-    // ── Step 6: Fallback — rightmost button inside composer ─
-    // Still 100% scoped inside the composer. No global page scan.
+    // Fallback — rightmost button inside composer
     composerButtons.sort((a, b) => b.getBoundingClientRect().right - a.getBoundingClientRect().right);
     const btn         = composerButtons[0];
     const displayText = btn.textContent.trim() || btn.getAttribute('aria-label') || 'button';
@@ -542,8 +646,26 @@
       }
       return true;
     }
+
+    // ── OMNIFLOW_INSPECT_COMPOSER (Phase 2.2) ─────────────
+    if (message.type === 'OMNIFLOW_INSPECT_COMPOSER') {
+      console.log('[OmniFlow][Inspect] Received OMNIFLOW_INSPECT_COMPOSER.');
+      try {
+        const result = performInspectComposer();
+        console.log('[OmniFlow][Inspect] Sending inspect result:', result);
+        sendResponse(result);
+      } catch (err) {
+        console.error('[OmniFlow][Inspect] Error:', err);
+        sendResponse({
+          success: false,
+          error: `Unexpected error: ${err.message}`,
+          timestamp: Date.now(),
+        });
+      }
+      return true;
+    }
   });
 
-  console.log('[OmniFlow][Content] Message router ready (OMNIFLOW_SCAN + OMNIFLOW_INJECT + OMNIFLOW_GENERATE).');
+  console.log('[OmniFlow][Content] Message router ready (OMNIFLOW_SCAN + OMNIFLOW_INJECT + OMNIFLOW_GENERATE + OMNIFLOW_INSPECT_COMPOSER).');
 
 })();

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "OmniFlow",
-  "version": "0.1.0",
-  "description": "Phase 0 — Validates that OmniFlow can inspect and understand the Omni webpage.",
+  "version": "0.2.2",
+  "description": "Phase 2.2 — Composer Inspector for DOM button discovery and targeting.",
 
   "action": {
     "default_popup": "popup.html",
