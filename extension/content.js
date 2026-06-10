@@ -16,10 +16,9 @@
   }
   window.__omniflowListenerRegistered = true;
 
-  // Global state object for Phase 3 generation tracking
+  // Global state object for Phase 3/3.1 generation tracking
   window.__omniflowGenState = window.__omniflowGenState || {
-    generating: false,
-    completed: false,
+    status: 'waiting',
     startTime: null,
     endTime: null,
     checkIntervalId: null
@@ -107,8 +106,7 @@
     }
 
     window.__omniflowGenState = {
-      generating: false,
-      completed: false,
+      status: 'waiting',
       startTime: Date.now(),
       endTime: null,
       checkIntervalId: null
@@ -118,21 +116,37 @@
       const elapsed = (Date.now() - window.__omniflowGenState.startTime) / 1000;
       const currentlyGenerating = isPageGenerating();
 
-      console.log(`[OmniFlow][Monitor] Generation in progress... (generating=${currentlyGenerating}, elapsed=${elapsed.toFixed(1)}s)`);
+      console.log(`[OmniFlow][Monitor] Generation status: ${window.__omniflowGenState.status}, currentlyGenerating: ${currentlyGenerating}, elapsed: ${elapsed.toFixed(1)}s`);
 
-      if (currentlyGenerating) {
-        window.__omniflowGenState.generating = true;
-      } else {
-        // If we are not currently generating:
-        // We only mark it as completed if it was previously generating OR if at least 5 seconds have passed
-        // (to avoid registering completion before the click is fully processed and the DOM updates).
-        if (window.__omniflowGenState.generating || elapsed > 5) {
-          window.__omniflowGenState.generating = false;
-          window.__omniflowGenState.completed = true;
+      if (window.__omniflowGenState.status === 'waiting') {
+        if (currentlyGenerating) {
+          window.__omniflowGenState.status = 'generating';
+          console.log('[OmniFlow][Monitor] Generation in progress');
+        } else {
+          // If no generation indicators appear within 15 seconds
+          if (elapsed > 15) {
+            window.__omniflowGenState.status = 'no_gen_detected';
+            window.__omniflowGenState.endTime = Date.now();
+            console.warn('[OmniFlow][Monitor] Generation aborted: No generation detected within 15 seconds.');
+            clearInterval(window.__omniflowGenState.checkIntervalId);
+            window.__omniflowGenState.checkIntervalId = null;
+          }
+        }
+      } else if (window.__omniflowGenState.status === 'generating') {
+        if (currentlyGenerating) {
+          // Maximum monitoring time: 5 minutes (300 seconds)
+          if (elapsed > 300) {
+            window.__omniflowGenState.status = 'timeout';
+            window.__omniflowGenState.endTime = Date.now();
+            console.error('[OmniFlow][Monitor] Generation aborted: Timed out after 5 minutes.');
+            clearInterval(window.__omniflowGenState.checkIntervalId);
+            window.__omniflowGenState.checkIntervalId = null;
+          }
+        } else {
+          // Generation completed
+          window.__omniflowGenState.status = 'completed';
           window.__omniflowGenState.endTime = Date.now();
-          
           console.log(`[OmniFlow][Monitor] Generation completed. Total time: ${elapsed.toFixed(1)}s`);
-          
           clearInterval(window.__omniflowGenState.checkIntervalId);
           window.__omniflowGenState.checkIntervalId = null;
         }
@@ -600,7 +614,7 @@
    * @returns {Object} result object matching the OMNIFLOW_GENERATE spec
    */
   function performGenerate() {
-    const INJECT_TEXT = 'Test video generation from OmniFlow';
+    const INJECT_TEXT = 'Create a 5-second cinematic video of a red sports car driving through a futuristic neon-lit city at night, realistic lighting, smooth camera movement, high quality.';
 
     const result = {
       success:        false,
@@ -635,8 +649,18 @@
       } else {
         injectIntoTextarea(editor, INJECT_TEXT);
       }
+
+      // Verification check: verify prompt was actually injected
+      const detected = readEditorText(editor).trim().toLowerCase();
+      const expected = INJECT_TEXT.trim().toLowerCase();
+      if (!detected.includes(expected.substring(0, 40))) {
+        result.error = 'Prompt verification failed: expected prompt text not found in editor DOM.';
+        console.warn(`[OmniFlow][Generate] Verification failed. Expected: "${INJECT_TEXT}" Detected: "${detected}"`);
+        return result;
+      }
+
       result.promptInjected = true;
-      console.log('[OmniFlow][Generate] Prompt injected ✓');
+      console.log('[OmniFlow][Generate] Prompt injected and verified ✓');
     } catch (e) {
       result.error = `Prompt injection failed: ${e.message}`;
       console.error('[OmniFlow][Generate] Injection error:', e);
@@ -758,14 +782,13 @@
       return true;
     }
 
-    // ── OMNIFLOW_GET_STATUS (Phase 3) ─────────────────────
+    // ── OMNIFLOW_GET_STATUS (Phase 3.1) ───────────────────
     if (message.type === 'OMNIFLOW_GET_STATUS') {
-      const state = window.__omniflowGenState || { generating: false, completed: false, startTime: null };
+      const state = window.__omniflowGenState || { status: 'waiting', startTime: null };
       const elapsedSeconds = state.startTime ? Math.round((Date.now() - state.startTime) / 1000) : 0;
       
       sendResponse({
-        generating: state.generating,
-        completed: state.completed,
+        status: state.status,
         elapsedSeconds: elapsedSeconds
       });
       return true;

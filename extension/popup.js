@@ -226,23 +226,35 @@ function hideInspectPanel() {
 
 /**
  * Update the generation status panel elements.
- * @param {Object} s - status object { generating, completed, elapsedSeconds }
+ * @param {Object} s - status object { status, elapsedSeconds }
  */
 function updateStatusPanel(s) {
   generationStatusPanel.classList.add('visible');
   
-  // Set badge class and text based on state
   statusStateBadge.className = 'status-state-badge';
   
-  if (s.completed) {
-    statusStateBadge.classList.add('badge-completed');
-    statusStateBadge.textContent = 'Completed';
-  } else if (s.generating) {
-    statusStateBadge.classList.add('badge-generating');
-    statusStateBadge.textContent = 'Generating';
-  } else {
-    statusStateBadge.classList.add('badge-waiting');
-    statusStateBadge.textContent = 'Waiting';
+  switch (s.status) {
+    case 'completed':
+      statusStateBadge.classList.add('badge-completed');
+      statusStateBadge.textContent = 'Completed';
+      break;
+    case 'generating':
+      statusStateBadge.classList.add('badge-generating');
+      statusStateBadge.textContent = 'Generating';
+      break;
+    case 'no_gen_detected':
+      statusStateBadge.classList.add('badge-no-gen');
+      statusStateBadge.textContent = 'No Generation Detected';
+      break;
+    case 'timeout':
+      statusStateBadge.classList.add('badge-timeout');
+      statusStateBadge.textContent = 'Timed Out';
+      break;
+    case 'waiting':
+    default:
+      statusStateBadge.classList.add('badge-waiting');
+      statusStateBadge.textContent = 'Waiting';
+      break;
   }
   
   statusTimerVal.textContent = `${s.elapsedSeconds || 0}s`;
@@ -266,7 +278,7 @@ function startStatusPolling(tabId) {
   }
 
   log('[Popup] Generation started', 'ok');
-  updateStatusPanel({ generating: false, completed: false, elapsedSeconds: 0 });
+  updateStatusPanel({ status: 'waiting', elapsedSeconds: 0 });
 
   // Disable UI buttons during generation
   generateBtn.disabled = true;
@@ -284,19 +296,38 @@ function startStatusPolling(tabId) {
         return;
       }
 
-      if (status.generating) {
-        log('[Popup] Generation in progress', 'info');
-      }
-
       updateStatusPanel(status);
 
-      if (status.completed) {
+      if (status.status === 'generating') {
+        log('[Popup] Generation in progress', 'info');
+      } else if (status.status === 'no_gen_detected') {
+        log('[Popup] Generation aborted: No generation detected within 15 seconds.', 'warn');
+        showError('No generation detected. Check if prompt was sent.');
+        clearInterval(statusPollIntervalId);
+        statusPollIntervalId = null;
+        setStatus('error');
+        
+        generateBtn.disabled = false;
+        injectBtn.disabled   = false;
+        testBtn.disabled     = false;
+        if (inspectBtn) inspectBtn.disabled = false;
+      } else if (status.status === 'timeout') {
+        log('[Popup] Generation aborted: Timed out after 5 minutes.', 'error');
+        showError('Generation timed out (5-minute limit exceeded).');
+        clearInterval(statusPollIntervalId);
+        statusPollIntervalId = null;
+        setStatus('error');
+        
+        generateBtn.disabled = false;
+        injectBtn.disabled   = false;
+        testBtn.disabled     = false;
+        if (inspectBtn) inspectBtn.disabled = false;
+      } else if (status.status === 'completed') {
         log('[Popup] Generation completed', 'ok');
         clearInterval(statusPollIntervalId);
         statusPollIntervalId = null;
         setStatus('success');
         
-        // Re-enable UI buttons
         generateBtn.disabled = false;
         injectBtn.disabled   = false;
         testBtn.disabled     = false;
@@ -309,7 +340,6 @@ function startStatusPolling(tabId) {
       setStatus('error');
       showError(`Status tracking error: ${err.message}`);
       
-      // Re-enable UI buttons
       generateBtn.disabled = false;
       injectBtn.disabled   = false;
       testBtn.disabled     = false;
@@ -783,5 +813,5 @@ logToggle.addEventListener('click', () => {
 });
 
 // ── Boot log ──────────────────────────────────────────────
-log('[Popup] OmniFlow Phase 3 popup loaded.', 'ok');
-updateStatusPanel({ generating: false, completed: false, elapsedSeconds: 0 });
+log('[Popup] OmniFlow Phase 3.1 popup loaded.', 'ok');
+updateStatusPanel({ status: 'waiting', elapsedSeconds: 0 });
