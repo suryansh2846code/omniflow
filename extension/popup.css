@@ -199,6 +199,44 @@ html, body {
   transform: none;
 }
 
+/* Generate button — teal accent to distinguish from Phase 1 */
+.btn-generate {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #0ea5e9, #06b6d4);
+  border: none;
+  border-radius: var(--radius-md);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.2s ease, transform 0.1s ease, box-shadow 0.2s ease;
+  box-shadow: 0 4px 14px rgba(14, 165, 233, 0.25);
+  letter-spacing: 0.1px;
+}
+
+.btn-generate:hover {
+  opacity: 0.9;
+  box-shadow: 0 6px 20px rgba(14, 165, 233, 0.35);
+  transform: translateY(-1px);
+}
+
+.btn-generate:active {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.btn-generate:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+
 /* ─── Results ───────────────────────────────────────────── */
 .results-section {
   padding: 0 16px 4px;
@@ -458,6 +496,105 @@ html, body {
   color: var(--text-primary);
   font-family: 'SF Mono', 'Fira Code', monospace;
   word-break: break-all;
+}
+
+/* ─── Generation Panel (Phase 2) ────────────────────── */
+.generate-panel {
+  display: none;
+  flex-direction: column;
+  gap: 0;
+  margin-bottom: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  animation: fadeIn 0.25s ease;
+}
+
+.generate-panel.visible {
+  display: flex;
+}
+
+.gen-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px 8px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(90deg, rgba(14,165,233,0.08), transparent);
+}
+
+.gen-panel-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: #38bdf8;
+}
+
+.gen-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.gen-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 12px;
+  border-bottom: 1px solid rgba(46, 51, 77, 0.5);
+  transition: background 0.15s ease;
+}
+
+.gen-row:last-child {
+  border-bottom: none;
+}
+
+.gen-row:hover {
+  background: rgba(14,165,233,0.04);
+}
+
+.gen-row-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.gen-row-val {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-subtle);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+/* Boolean check values */
+.gen-row-val.val-true {
+  color: var(--success);
+}
+
+.gen-row-val.val-true::before {
+  content: '✓ ';
+}
+
+.gen-row-val.val-false {
+  color: var(--error);
+}
+
+.gen-row-val.val-false::before {
+  content: '✗ ';
+}
+
+/* Strategy tag */
+.gen-row-strategy .gen-row-val {
+  color: #38bdf8;
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 20px;
+  background: rgba(14,165,233,0.1);
+  border: 1px solid rgba(14,165,233,0.2);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-weight: 700;
+  text-transform: none;
 }
 
 @keyframes fadeIn {

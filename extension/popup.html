@@ -14,7 +14,7 @@
       <div class="logo-icon">⚡</div>
       <div class="logo-text">
         <h1 class="title">OmniFlow</h1>
-        <span class="subtitle">Phase 1 · Prompt Injection</span>
+        <span class="subtitle">Phase 2 · Generate Automation</span>
       </div>
     </div>
     <div class="status-dot" id="statusDot" title="Idle"></div>
@@ -29,6 +29,10 @@
     <button id="injectBtn" class="btn-secondary">
       <span class="btn-icon">💉</span>
       <span class="btn-label">Test Prompt Injection</span>
+    </button>
+    <button id="generateBtn" class="btn-generate">
+      <span class="btn-icon">🚀</span>
+      <span class="btn-label">Test Generate Click</span>
     </button>
   </section>
 
@@ -60,6 +64,39 @@
       <div class="inject-text-row" id="injectTextRow">
         <span class="inject-text-label">Detected Text</span>
         <span class="inject-text-value" id="injectTextValue"></span>
+      </div>
+    </div>
+
+    <!-- Generation result panel -->
+    <div class="generate-panel" id="generatePanel" aria-live="polite">
+      <div class="gen-panel-header">
+        <span class="gen-panel-title">Generation Test</span>
+      </div>
+      <div class="gen-rows" id="genRows">
+        <div class="gen-row">
+          <span class="gen-row-label">Editor Found</span>
+          <span class="gen-row-val" id="genEditorFound">—</span>
+        </div>
+        <div class="gen-row">
+          <span class="gen-row-label">Prompt Injected</span>
+          <span class="gen-row-val" id="genPromptInjected">—</span>
+        </div>
+        <div class="gen-row">
+          <span class="gen-row-label">Button Found</span>
+          <span class="gen-row-val" id="genButtonFound">—</span>
+        </div>
+        <div class="gen-row">
+          <span class="gen-row-label">Button Clicked</span>
+          <span class="gen-row-val" id="genButtonClicked">—</span>
+        </div>
+        <div class="gen-row gen-row-strategy" id="genStrategyRow">
+          <span class="gen-row-label">Strategy Used</span>
+          <span class="gen-row-val" id="genStrategy">—</span>
+        </div>
+        <div class="gen-row" id="genButtonTextRow">
+          <span class="gen-row-label">Button Text</span>
+          <span class="gen-row-val" id="genButtonText">—</span>
+        </div>
       </div>
     </div>
 

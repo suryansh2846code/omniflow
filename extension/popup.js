@@ -28,6 +28,16 @@ const injectBadge     = document.getElementById('injectBadge');
 const injectTextRow   = document.getElementById('injectTextRow');
 const injectTextValue = document.getElementById('injectTextValue');
 
+// Phase 2 refs
+const generateBtn      = document.getElementById('generateBtn');
+const generatePanel    = document.getElementById('generatePanel');
+const genEditorFound   = document.getElementById('genEditorFound');
+const genPromptInjected = document.getElementById('genPromptInjected');
+const genButtonFound   = document.getElementById('genButtonFound');
+const genButtonClicked = document.getElementById('genButtonClicked');
+const genStrategy      = document.getElementById('genStrategy');
+const genButtonText    = document.getElementById('genButtonText');
+
 // ── Log helpers ───────────────────────────────────────────
 /**
  * Append a line to the diagnostic log panel.
@@ -92,6 +102,54 @@ function hideInjectPanel() {
   injectBadge.className = 'inject-badge';
   injectBadge.textContent = '';
   injectTextValue.textContent = '';
+}
+
+// ── Phase 2: generation panel helpers ───────────────────────
+/**
+ * Set a gen-row value element with boolean styling.
+ * @param {HTMLElement} el
+ * @param {boolean|null} value  null = reset
+ * @param {string} [trueLabel]  custom text when true
+ * @param {string} [falseLabel] custom text when false
+ */
+function setGenBool(el, value, trueLabel = 'yes', falseLabel = 'no') {
+  el.className = 'gen-row-val';
+  if (value === null) {
+    el.textContent = '—';
+    return;
+  }
+  el.classList.add(value ? 'val-true' : 'val-false');
+  el.textContent = value ? trueLabel : falseLabel;
+}
+
+/**
+ * Populate the generation result panel with response data.
+ * @param {Object} r - OMNIFLOW_GENERATE response
+ */
+function renderGenerateResult(r) {
+  generatePanel.classList.add('visible');
+
+  setGenBool(genEditorFound,    r.editorFound,    '', '');
+  setGenBool(genPromptInjected, r.promptInjected, '', '');
+  setGenBool(genButtonFound,    r.buttonFound,    '', '');
+  setGenBool(genButtonClicked,  r.buttonClicked,  '', '');
+
+  // Strategy
+  genStrategy.className = 'gen-row-val';
+  genStrategy.textContent = r.strategyUsed || '—';
+
+  // Button text / label
+  genButtonText.className = 'gen-row-val';
+  genButtonText.textContent = r.buttonText || '—';
+}
+
+function hideGeneratePanel() {
+  generatePanel.classList.remove('visible');
+  [genEditorFound, genPromptInjected, genButtonFound, genButtonClicked, genStrategy, genButtonText]
+    .forEach(el => {
+      el.className = 'gen-row-val';
+      el.textContent = '—';
+    });
 }
 
 function revealCards() {
@@ -354,6 +412,79 @@ if (injectBtn) {
   });
 }
 
+// ── Phase 2: generate button click ────────────────────────
+if (generateBtn) {
+  generateBtn.addEventListener('click', async () => {
+    clearError();
+    hideGeneratePanel();
+
+    generateBtn.disabled = true;
+    injectBtn.disabled   = true;
+    testBtn.disabled     = true;
+    setStatus('running');
+    log('[Popup] Test Generate Click clicked.', 'info');
+
+    try {
+      // 1. Get active tab
+      log('[Popup] Querying active tab…', 'info');
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+      if (!tab) { showError('No active tab found.'); return; }
+
+      log(`[Popup] Active tab: ${tab.url}`, 'info');
+
+      const restrictedPrefixes = ['chrome://', 'chrome-extension://', 'about:', 'edge://', 'brave://'];
+      if (restrictedPrefixes.some(p => tab.url?.startsWith(p))) {
+        showError('Cannot access browser internal pages.');
+        return;
+      }
+
+      // 2. Inject content.js
+      log('[Popup] Injecting content.js…', 'info');
+      try {
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+        log('[Popup] content.js injected.', 'ok');
+      } catch (injectErr) {
+        showError(`Injection failed: ${injectErr.message}`);
+        return;
+      }
+
+      // 3. Send OMNIFLOW_GENERATE
+      log('[Popup] Sending OMNIFLOW_GENERATE to content script…', 'info');
+      let result;
+      try {
+        result = await chrome.tabs.sendMessage(tab.id, { type: 'OMNIFLOW_GENERATE' });
+      } catch (msgErr) {
+        showError(`Could not reach content script: ${msgErr.message}`);
+        return;
+      }
+
+      if (!result) { showError('Content script returned no data.'); return; }
+
+      // 4. Render result
+      log(`[Popup] GENERATE result received. success=${result.success}`, result.success ? 'ok' : 'warn');
+      log(`[Popup] editorFound=${result.editorFound}, promptInjected=${result.promptInjected}`, 'info');
+      log(`[Popup] buttonFound=${result.buttonFound}, buttonClicked=${result.buttonClicked}`, 'info');
+      if (result.strategyUsed) log(`[Popup] Strategy used: ${result.strategyUsed}`, 'ok');
+      if (result.error)        log(`[Popup] Error: ${result.error}`, 'error');
+
+      renderGenerateResult(result);
+      setStatus(result.success ? 'success' : 'error');
+
+      if (!result.success) {
+        showError(result.error || 'Generate automation failed.');
+      }
+
+    } catch (err) {
+      showError(`Unexpected error: ${err.message}`);
+    } finally {
+      generateBtn.disabled = false;
+      injectBtn.disabled   = false;
+      testBtn.disabled     = false;
+    }
+  });
+}
+
 // ── Log toggle ────────────────────────────────────────────
 logToggle.addEventListener('click', () => {
   const isOpen = logBox.classList.toggle('open');
@@ -363,4 +494,4 @@ logToggle.addEventListener('click', () => {
 });
 
 // ── Boot log ──────────────────────────────────────────────
-log('[Popup] OmniFlow Phase 1 popup loaded.', 'ok');
+log('[Popup] OmniFlow Phase 2 popup loaded.', 'ok');

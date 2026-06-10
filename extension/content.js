@@ -1,8 +1,9 @@
 // ─────────────────────────────────────────────────────────
-// OmniFlow — content.js  (Phase 1)
-// Handles two messages:
-//   OMNIFLOW_SCAN   → Phase 0: DOM scan + candidate scoring
-//   OMNIFLOW_INJECT → Phase 1: Prompt injection into editor
+// OmniFlow — content.js  (Phase 2)
+// Handles three messages:
+//   OMNIFLOW_SCAN     → Phase 0: DOM scan + candidate scoring
+//   OMNIFLOW_INJECT   → Phase 1: Prompt injection into editor
+//   OMNIFLOW_GENERATE → Phase 2: Inject prompt + click generate button
 // ─────────────────────────────────────────────────────────
 
 (function () {
@@ -383,6 +384,235 @@
   }
 
   // ════════════════════════════════════════════════════════
+  //  PHASE 2 — GENERATE BUTTON DETECTION & CLICK
+  // ════════════════════════════════════════════════════════
+
+  /**
+   * Check if a button element is visible and not disabled.
+   * @param {Element} el
+   * @returns {boolean}
+   */
+  function isButtonUsable(el) {
+    if (!isVisible(el)) return false;
+    if (el.disabled) return false;
+    if (el.getAttribute('aria-disabled') === 'true') return false;
+    return true;
+  }
+
+  /**
+   * Locate the Generate / Create / Submit button using a 4-strategy cascade.
+   *
+   * Strategy 1 — Text/icon match: any button whose textContent contains
+   *   'arrow_forward' (the Material icon name Flow uses), or common labels.
+   * Strategy 2 — Proximity: buttons that share a DOM ancestor with the
+   *   Slate editor (prompt-bar container).
+   * Strategy 3 — Geometric: the usable button whose left edge is immediately
+   *   to the right of the editor's right edge.
+   * Strategy 4 — Last resort: the last visible, enabled button on the page.
+   *
+   * @returns {{ button: Element|null, strategy: string, buttonText: string }}
+   */
+  function findGenerateButton() {
+    console.log('[OmniFlow][Generate] Searching for generate button…');
+
+    // Collect all button-like elements once
+    const allButtons = Array.from(document.querySelectorAll(
+      'button, [role="button"], input[type="submit"], input[type="button"]'
+    ));
+
+    // ── Strategy 1: text/icon content match ──────────────
+    const GENERATE_LABELS = [
+      'arrow_forward',
+      'generate',
+      'create',
+      'submit',
+      'run',
+      'send',
+      'go',
+    ];
+
+    for (const btn of allButtons) {
+      if (!isButtonUsable(btn)) continue;
+      const text = (btn.textContent || btn.value || btn.getAttribute('aria-label') || '').trim().toLowerCase();
+      const matched = GENERATE_LABELS.find(label => text.includes(label));
+      if (matched) {
+        const displayText = btn.textContent.trim() || btn.getAttribute('aria-label') || matched;
+        console.log(`[OmniFlow][Generate] Strategy #1 succeeded: found “${displayText}”`);
+        return { button: btn, strategy: 'arrow_forward_text', buttonText: displayText };
+      }
+    }
+    console.log('[OmniFlow][Generate] Strategy #1: no match.');
+
+    // ── Strategy 2: shared container with editor ─────────
+    const editor = findEditor();
+    if (editor) {
+      // Walk up to find the prompt bar — the nearest ancestor that also
+      // contains at least one button.
+      let ancestor = editor.parentElement;
+      while (ancestor && ancestor !== document.body) {
+        const containerButtons = Array.from(
+          ancestor.querySelectorAll('button, [role="button"]')
+        ).filter(isButtonUsable);
+
+        if (containerButtons.length > 0) {
+          // Among these, prefer rightmost (by bounding box)
+          containerButtons.sort((a, b) => {
+            const ra = a.getBoundingClientRect();
+            const rb = b.getBoundingClientRect();
+            return rb.right - ra.right; // descending — rightmost first
+          });
+          const btn = containerButtons[0];
+          const displayText = btn.textContent.trim() || btn.getAttribute('aria-label') || 'button';
+          console.log(`[OmniFlow][Generate] Strategy #2 succeeded: rightmost button in prompt container “${displayText}”`);
+          return { button: btn, strategy: 'prompt_container_rightmost', buttonText: displayText };
+        }
+        ancestor = ancestor.parentElement;
+      }
+    }
+    console.log('[OmniFlow][Generate] Strategy #2: no match.');
+
+    // ── Strategy 3: geometric — button immediately right of editor ──
+    if (editor) {
+      const editorRect = editor.getBoundingClientRect();
+      const TOLERANCE  = 120; // px — how far right of editor we look
+
+      const geometricMatch = allButtons
+        .filter(isButtonUsable)
+        .filter(btn => {
+          const r = btn.getBoundingClientRect();
+          // Button's left edge must be >= editor's right edge (within tolerance)
+          // and vertically overlapping with the editor
+          return (
+            r.left  >= editorRect.right - 20 &&
+            r.left  <= editorRect.right + TOLERANCE &&
+            r.bottom >= editorRect.top &&
+            r.top   <= editorRect.bottom
+          );
+        })
+        // Take the closest one (smallest horizontal gap)
+        .sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+
+      if (geometricMatch.length > 0) {
+        const btn = geometricMatch[0];
+        const displayText = btn.textContent.trim() || btn.getAttribute('aria-label') || 'button';
+        console.log(`[OmniFlow][Generate] Strategy #3 succeeded: geometric proximity “${displayText}”`);
+        return { button: btn, strategy: 'geometric_right_of_editor', buttonText: displayText };
+      }
+    }
+    console.log('[OmniFlow][Generate] Strategy #3: no match.');
+
+    // ── Strategy 4: last visible enabled button on page ──
+    const usableButtons = allButtons.filter(isButtonUsable);
+    if (usableButtons.length > 0) {
+      // Pick the one with the rightmost + lowest position (typical submit position)
+      usableButtons.sort((a, b) => {
+        const ra = a.getBoundingClientRect();
+        const rb = b.getBoundingClientRect();
+        // Combined score: bottom + right position
+        return (rb.bottom + rb.right) - (ra.bottom + ra.right);
+      });
+      const btn = usableButtons[0];
+      const displayText = btn.textContent.trim() || btn.getAttribute('aria-label') || 'button';
+      console.log(`[OmniFlow][Generate] Strategy #4 succeeded (last resort): “${displayText}”`);
+      return { button: btn, strategy: 'last_visible_button', buttonText: displayText };
+    }
+
+    console.warn('[OmniFlow][Generate] All 4 strategies failed. No generate button found.');
+    return { button: null, strategy: 'none', buttonText: '' };
+  }
+
+  /**
+   * Full Phase 2 automation:
+   *   1. Find editor
+   *   2. Inject prompt text
+   *   3. Find generate button
+   *   4. Click it
+   *   5. Return structured result
+   *
+   * @returns {Object} result object matching the OMNIFLOW_GENERATE spec
+   */
+  function performGenerate() {
+    const INJECT_TEXT = 'Test video generation from OmniFlow';
+
+    const result = {
+      success:        false,
+      editorFound:    false,
+      promptInjected: false,
+      buttonFound:    false,
+      buttonClicked:  false,
+      strategyUsed:   '',
+      buttonText:     '',
+      timestamp:      Date.now(),
+    };
+
+    // ── Step 1: Find editor ───────────────────────────────
+    console.log('[OmniFlow][Generate] Locating editor…');
+    const editor = findEditor();
+    if (!editor) {
+      result.error = 'Editor not found. Make sure you are on a Flow/Omni editor page.';
+      console.warn('[OmniFlow][Generate] Editor not found.');
+      return result;
+    }
+    result.editorFound = true;
+    console.log('[OmniFlow][Generate] Editor found ✓');
+
+    // ── Step 2: Inject prompt ─────────────────────────────
+    console.log('[OmniFlow][Generate] Injecting prompt…');
+    try {
+      const isContentEditable =
+        editor.getAttribute('contenteditable') === 'true' || editor.isContentEditable;
+
+      if (isContentEditable) {
+        injectIntoContentEditable(editor, INJECT_TEXT);
+      } else {
+        injectIntoTextarea(editor, INJECT_TEXT);
+      }
+      result.promptInjected = true;
+      console.log('[OmniFlow][Generate] Prompt injected ✓');
+    } catch (e) {
+      result.error = `Prompt injection failed: ${e.message}`;
+      console.error('[OmniFlow][Generate] Injection error:', e);
+      return result;
+    }
+
+    // ── Step 3: Find generate button ─────────────────────
+    console.log('[OmniFlow][Generate] Searching generate button…');
+    const { button, strategy, buttonText } = findGenerateButton();
+
+    result.strategyUsed = strategy;
+    result.buttonText   = buttonText;
+
+    if (!button) {
+      result.error = 'Generate button not found after trying all 4 strategies.';
+      return result;
+    }
+    result.buttonFound = true;
+    console.log(`[OmniFlow][Generate] Button found via strategy: ${strategy} ✓`);
+
+    // ── Step 4: Click ─────────────────────────────────────
+    console.log('[OmniFlow][Generate] Clicking button…');
+    try {
+      button.focus();
+      button.click();
+
+      // Fire pointer events for frameworks that intercept them
+      button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+      button.dispatchEvent(new MouseEvent('mousedown',    { bubbles: true, cancelable: true }));
+      button.dispatchEvent(new MouseEvent('mouseup',      { bubbles: true, cancelable: true }));
+      button.dispatchEvent(new MouseEvent('click',        { bubbles: true, cancelable: true }));
+
+      result.buttonClicked = true;
+      result.success       = true;
+      console.log('[OmniFlow][Generate] Generation trigger completed ✓');
+    } catch (e) {
+      result.error = `Button click failed: ${e.message}`;
+      console.error('[OmniFlow][Generate] Click error:', e);
+    }
+
+    return result;
+  }
+
+  // ════════════════════════════════════════════════════════
   //  MESSAGE ROUTER
   // ════════════════════════════════════════════════════════
 
@@ -419,8 +649,27 @@
       }
       return true;
     }
+
+    // ── OMNIFLOW_GENERATE (Phase 2) ───────────────────────
+    if (message.type === 'OMNIFLOW_GENERATE') {
+      console.log('[OmniFlow][Generate] Received OMNIFLOW_GENERATE.');
+      try {
+        const result = performGenerate();
+        console.log('[OmniFlow][Generate] Sending generate result:', result);
+        sendResponse(result);
+      } catch (err) {
+        console.error('[OmniFlow][Generate] Error:', err);
+        sendResponse({
+          success: false, editorFound: false, promptInjected: false,
+          buttonFound: false, buttonClicked: false,
+          error: `Unexpected error: ${err.message}`,
+          timestamp: Date.now(),
+        });
+      }
+      return true;
+    }
   });
 
-  console.log('[OmniFlow][Content] Message router ready (OMNIFLOW_SCAN + OMNIFLOW_INJECT).');
+  console.log('[OmniFlow][Content] Message router ready (OMNIFLOW_SCAN + OMNIFLOW_INJECT + OMNIFLOW_GENERATE).');
 
 })();
