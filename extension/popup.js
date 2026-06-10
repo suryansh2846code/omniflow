@@ -783,4 +783,5 @@ logToggle.addEventListener('click', () => {
 });
 
 // ── Boot log ──────────────────────────────────────────────
-log('[Popup] OmniFlow Phase 2 popup loaded.', 'ok');
+log('[Popup] OmniFlow Phase 3 popup loaded.', 'ok');
+updateStatusPanel({ generating: false, completed: false, elapsedSeconds: 0 });
