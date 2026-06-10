@@ -16,7 +16,16 @@
   }
   window.__omniflowListenerRegistered = true;
 
-  console.log('[OmniFlow][Content] Content script initialised (Phase 2.1).');
+  // Global state object for Phase 3 generation tracking
+  window.__omniflowGenState = window.__omniflowGenState || {
+    generating: false,
+    completed: false,
+    startTime: null,
+    endTime: null,
+    checkIntervalId: null
+  };
+
+  console.log('[OmniFlow][Content] Content script initialised (Phase 3).');
 
   // ════════════════════════════════════════════════════════
   //  SHARED HELPERS
@@ -48,6 +57,87 @@
       visible:         isVisible(el),
       large:           isLarge(el),
     };
+  }
+
+  /**
+   * Check if the page is currently generating a video (Phase 3).
+   * Scans for loading states, progress bars, and stop/cancel indicators.
+   *
+   * @returns {boolean}
+   */
+  function isPageGenerating() {
+    // 1. Check for visible stop/cancel buttons
+    const stopButton = Array.from(document.querySelectorAll('button, [role="button"]')).find(btn => {
+      if (!isVisible(btn)) return false;
+      const text = (btn.textContent || btn.getAttribute('aria-label') || '').trim().toLowerCase();
+      return text.includes('stop') || text.includes('cancel');
+    });
+    if (stopButton) return true;
+
+    // 2. Check for active progress bar or loading indicators
+    const progressSelectors = [
+      'progress', 'mat-progress-bar', '[role="progressbar"]',
+      '.progress', '.loading', '.shimmer', '.generating', '.spinner',
+      '[class*="loading"]', '[class*="generating"]', '[class*="progress"]'
+    ];
+    const progressIndicators = Array.from(
+      document.querySelectorAll(progressSelectors.join(', '))
+    ).filter(isVisible);
+
+    if (progressIndicators.length > 0) return true;
+
+    // 3. Check for specific text indicators in page content
+    const bodyText = document.body.innerText || '';
+    if (bodyText.includes('Generating video...') || bodyText.includes('Creating video...')) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Starts monitoring the video generation progress.
+   */
+  function startGenerationMonitoring() {
+    console.log('[OmniFlow][Monitor] Generation started');
+    
+    // Clear any existing monitor
+    if (window.__omniflowGenState.checkIntervalId) {
+      clearInterval(window.__omniflowGenState.checkIntervalId);
+    }
+
+    window.__omniflowGenState = {
+      generating: false,
+      completed: false,
+      startTime: Date.now(),
+      endTime: null,
+      checkIntervalId: null
+    };
+
+    window.__omniflowGenState.checkIntervalId = setInterval(() => {
+      const elapsed = (Date.now() - window.__omniflowGenState.startTime) / 1000;
+      const currentlyGenerating = isPageGenerating();
+
+      console.log(`[OmniFlow][Monitor] Generation in progress... (generating=${currentlyGenerating}, elapsed=${elapsed.toFixed(1)}s)`);
+
+      if (currentlyGenerating) {
+        window.__omniflowGenState.generating = true;
+      } else {
+        // If we are not currently generating:
+        // We only mark it as completed if it was previously generating OR if at least 5 seconds have passed
+        // (to avoid registering completion before the click is fully processed and the DOM updates).
+        if (window.__omniflowGenState.generating || elapsed > 5) {
+          window.__omniflowGenState.generating = false;
+          window.__omniflowGenState.completed = true;
+          window.__omniflowGenState.endTime = Date.now();
+          
+          console.log(`[OmniFlow][Monitor] Generation completed. Total time: ${elapsed.toFixed(1)}s`);
+          
+          clearInterval(window.__omniflowGenState.checkIntervalId);
+          window.__omniflowGenState.checkIntervalId = null;
+        }
+      }
+    }, 1000);
   }
 
   // ════════════════════════════════════════════════════════
@@ -582,6 +672,9 @@
       result.buttonClicked = true;
       result.success       = true;
       console.log('[OmniFlow][Generate] Generation trigger completed ✓');
+
+      // Start background state tracking
+      startGenerationMonitoring();
     } catch (e) {
       result.error = `Button click failed: ${e.message}`;
       console.error('[OmniFlow][Generate] Click error:', e);
@@ -664,8 +757,21 @@
       }
       return true;
     }
+
+    // ── OMNIFLOW_GET_STATUS (Phase 3) ─────────────────────
+    if (message.type === 'OMNIFLOW_GET_STATUS') {
+      const state = window.__omniflowGenState || { generating: false, completed: false, startTime: null };
+      const elapsedSeconds = state.startTime ? Math.round((Date.now() - state.startTime) / 1000) : 0;
+      
+      sendResponse({
+        generating: state.generating,
+        completed: state.completed,
+        elapsedSeconds: elapsedSeconds
+      });
+      return true;
+    }
   });
 
-  console.log('[OmniFlow][Content] Message router ready (OMNIFLOW_SCAN + OMNIFLOW_INJECT + OMNIFLOW_GENERATE + OMNIFLOW_INSPECT_COMPOSER).');
+  console.log('[OmniFlow][Content] Message router ready (OMNIFLOW_SCAN + OMNIFLOW_INJECT + OMNIFLOW_GENERATE + OMNIFLOW_INSPECT_COMPOSER + OMNIFLOW_GET_STATUS).');
 
 })();

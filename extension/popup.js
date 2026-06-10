@@ -46,6 +46,14 @@ const inspectButtonsFound  = document.getElementById('inspectButtonsFound');
 const inspectButtonsWrap   = document.getElementById('inspectButtonsWrap');
 const inspectButtonsList   = document.getElementById('inspectButtonsList');
 
+// Phase 3 refs
+const generationStatusPanel = document.getElementById('generationStatusPanel');
+const statusStateBadge      = document.getElementById('statusStateBadge');
+const statusTimerVal        = document.getElementById('statusTimerVal');
+
+// Poll interval ID
+let statusPollIntervalId = null;
+
 // ── Log helpers ───────────────────────────────────────────
 /**
  * Append a line to the diagnostic log panel.
@@ -216,6 +224,100 @@ function hideInspectPanel() {
   inspectButtonsList.innerHTML = '';
 }
 
+/**
+ * Update the generation status panel elements.
+ * @param {Object} s - status object { generating, completed, elapsedSeconds }
+ */
+function updateStatusPanel(s) {
+  generationStatusPanel.classList.add('visible');
+  
+  // Set badge class and text based on state
+  statusStateBadge.className = 'status-state-badge';
+  
+  if (s.completed) {
+    statusStateBadge.classList.add('badge-completed');
+    statusStateBadge.textContent = 'Completed';
+  } else if (s.generating) {
+    statusStateBadge.classList.add('badge-generating');
+    statusStateBadge.textContent = 'Generating';
+  } else {
+    statusStateBadge.classList.add('badge-waiting');
+    statusStateBadge.textContent = 'Waiting';
+  }
+  
+  statusTimerVal.textContent = `${s.elapsedSeconds || 0}s`;
+}
+
+function hideStatusPanel() {
+  generationStatusPanel.classList.remove('visible');
+  statusStateBadge.className = 'status-state-badge badge-waiting';
+  statusStateBadge.textContent = 'Waiting';
+  statusTimerVal.textContent = '0s';
+}
+
+/**
+ * Starts polling the content script for generation status.
+ * @param {number} tabId
+ */
+function startStatusPolling(tabId) {
+  // Clear any existing poll
+  if (statusPollIntervalId) {
+    clearInterval(statusPollIntervalId);
+  }
+
+  log('[Popup] Generation started', 'ok');
+  updateStatusPanel({ generating: false, completed: false, elapsedSeconds: 0 });
+
+  // Disable UI buttons during generation
+  generateBtn.disabled = true;
+  injectBtn.disabled   = true;
+  testBtn.disabled     = true;
+  if (inspectBtn) inspectBtn.disabled = true;
+  setStatus('running');
+
+  statusPollIntervalId = setInterval(async () => {
+    try {
+      const status = await chrome.tabs.sendMessage(tabId, { type: 'OMNIFLOW_GET_STATUS' });
+      
+      if (!status) {
+        log('[Popup] Status check returned empty result', 'warn');
+        return;
+      }
+
+      if (status.generating) {
+        log('[Popup] Generation in progress', 'info');
+      }
+
+      updateStatusPanel(status);
+
+      if (status.completed) {
+        log('[Popup] Generation completed', 'ok');
+        clearInterval(statusPollIntervalId);
+        statusPollIntervalId = null;
+        setStatus('success');
+        
+        // Re-enable UI buttons
+        generateBtn.disabled = false;
+        injectBtn.disabled   = false;
+        testBtn.disabled     = false;
+        if (inspectBtn) inspectBtn.disabled = false;
+      }
+    } catch (err) {
+      log(`[Popup] Status check failed: ${err.message}`, 'error');
+      clearInterval(statusPollIntervalId);
+      statusPollIntervalId = null;
+      setStatus('error');
+      showError(`Status tracking error: ${err.message}`);
+      
+      // Re-enable UI buttons
+      generateBtn.disabled = false;
+      injectBtn.disabled   = false;
+      testBtn.disabled     = false;
+      if (inspectBtn) inspectBtn.disabled = false;
+    }
+  }, 1000);
+}
+
 function revealCards() {
   [cardUrl, cardTitle, cardCount].forEach((card, i) => {
     setTimeout(() => card.classList.add('visible'), i * 60);
@@ -307,6 +409,11 @@ testBtn.addEventListener('click', async () => {
   hideInjectPanel();
   hideGeneratePanel();
   hideInspectPanel();
+  hideStatusPanel();
+  if (statusPollIntervalId) {
+    clearInterval(statusPollIntervalId);
+    statusPollIntervalId = null;
+  }
   candidatesWrap.classList.remove('visible');
   candidatesList.innerHTML = '';
   [cardUrl, cardTitle, cardCount].forEach(c => c.classList.remove('visible'));
@@ -410,6 +517,11 @@ if (injectBtn) {
     hideInjectPanel();
     hideGeneratePanel();
     hideInspectPanel();
+    hideStatusPanel();
+    if (statusPollIntervalId) {
+      clearInterval(statusPollIntervalId);
+      statusPollIntervalId = null;
+    }
 
     injectBtn.disabled = true;
     testBtn.disabled = true;
@@ -495,6 +607,11 @@ if (generateBtn) {
     hideGeneratePanel();
     hideInjectPanel();
     hideInspectPanel();
+    hideStatusPanel();
+    if (statusPollIntervalId) {
+      clearInterval(statusPollIntervalId);
+      statusPollIntervalId = null;
+    }
 
     generateBtn.disabled = true;
     injectBtn.disabled   = true;
@@ -552,15 +669,20 @@ if (generateBtn) {
 
       if (!result.success) {
         showError(result.error || 'Generate automation failed.');
+      } else {
+        // Start status tracking polling
+        startStatusPolling(tab.id);
       }
 
     } catch (err) {
       showError(`Unexpected error: ${err.message}`);
     } finally {
-      generateBtn.disabled = false;
-      injectBtn.disabled   = false;
-      testBtn.disabled     = false;
-      if (inspectBtn) inspectBtn.disabled = false;
+      if (!statusPollIntervalId) {
+        generateBtn.disabled = false;
+        injectBtn.disabled   = false;
+        testBtn.disabled     = false;
+        if (inspectBtn) inspectBtn.disabled = false;
+      }
     }
   });
 }
@@ -572,6 +694,11 @@ if (inspectBtn) {
     hideInspectPanel();
     hideInjectPanel();
     hideGeneratePanel();
+    hideStatusPanel();
+    if (statusPollIntervalId) {
+      clearInterval(statusPollIntervalId);
+      statusPollIntervalId = null;
+    }
 
     inspectBtn.disabled  = true;
     generateBtn.disabled = true;
