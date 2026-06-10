@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────
-// OmniFlow — content.js  (Phase 2)
+// OmniFlow — content.js  (Phase 2.1)
 // Handles three messages:
 //   OMNIFLOW_SCAN     → Phase 0: DOM scan + candidate scoring
 //   OMNIFLOW_INJECT   → Phase 1: Prompt injection into editor
@@ -10,17 +10,13 @@
   'use strict';
 
   // ── Duplicate-listener guard ─────────────────────────────
-  // We track whether our listener is already registered so that
-  // re-injections (popup re-opens, second button click) don't
-  // stack duplicate handlers.  We do NOT use window.__omniflowInjected
-  // because that would silently block every call after the first.
   if (window.__omniflowListenerRegistered) {
     console.log('[OmniFlow][Content] Listener already registered — skipping re-attach.');
     return;
   }
   window.__omniflowListenerRegistered = true;
 
-  console.log('[OmniFlow][Content] Content script initialised (Phase 1).');
+  console.log('[OmniFlow][Content] Content script initialised (Phase 2.1).');
 
   // ════════════════════════════════════════════════════════
   //  SHARED HELPERS
@@ -118,33 +114,24 @@
 
   /**
    * Find the best prompt editor on the page.
-   *
-   * Priority order (most specific → most general):
-   *  1. data-slate-editor="true"  — Slate.js (used by Omni / Flow)
-   *  2. role="textbox" + contenteditable
-   *  3. Any visible contenteditable
-   *  4. First visible textarea
-   *
+   * Priority: Slate → ARIA textbox → visible contenteditable → visible textarea
    * @returns {Element|null}
    */
   function findEditor() {
     console.log('[OmniFlow][Content] Locating editor…');
 
-    // 1 — Slate editor (Omni / Google Flow)
     const slate = document.querySelector('[data-slate-editor="true"]');
     if (slate) {
       console.log('[OmniFlow][Content] Editor found via data-slate-editor.');
       return slate;
     }
 
-    // 2 — ARIA textbox + contenteditable
     const ariaTextbox = document.querySelector('[role="textbox"][contenteditable="true"]');
     if (ariaTextbox) {
       console.log('[OmniFlow][Content] Editor found via role=textbox+contenteditable.');
       return ariaTextbox;
     }
 
-    // 3 — Any visible contenteditable
     const editables = Array.from(document.querySelectorAll('[contenteditable="true"]'));
     const visibleEditable = editables.find(isVisible);
     if (visibleEditable) {
@@ -152,7 +139,6 @@
       return visibleEditable;
     }
 
-    // 4 — Visible textarea
     const textareas = Array.from(document.querySelectorAll('textarea'));
     const visibleTextarea = textareas.find(isVisible);
     if (visibleTextarea) {
@@ -164,28 +150,13 @@
     return null;
   }
 
-  /**
-   * Read the current text from an editor element.
-   * Handles both contenteditable and textarea/input.
-   * @param {Element} editor
-   * @returns {string}
-   */
   function readEditorText(editor) {
     if (editor.tagName === 'TEXTAREA' || editor.tagName === 'INPUT') {
       return editor.value;
     }
-    // contenteditable — use innerText to preserve line breaks
     return editor.innerText || editor.textContent || '';
   }
 
-  /**
-   * Dispatch a synthetic keyboard event.
-   * Required for frameworks (React, Slate, etc.) that listen to key events
-   * rather than DOM mutations.
-   * @param {Element} el
-   * @param {string} type  'keydown' | 'keypress' | 'keyup'
-   * @param {object} init  KeyboardEventInit overrides
-   */
   function fireKeyEvent(el, type, init = {}) {
     el.dispatchEvent(new KeyboardEvent(type, {
       bubbles: true,
@@ -195,83 +166,43 @@
     }));
   }
 
-  /**
-   * Inject text into a contenteditable element using the most
-   * framework-compatible approach available.
-   *
-   * Strategy (tried in order):
-   *  A. document.execCommand('insertText')  — works in most browsers/editors
-   *     incl. Slate; triggers the editor's own mutation handling.
-   *  B. Clipboard DataTransfer paste event  — works for some frameworks
-   *     that intercept paste but not execCommand.
-   *  C. Direct innerText assignment + manual React/Slate event firing
-   *     — last resort; may or may not stick depending on framework version.
-   *
-   * @param {Element} editor
-   * @param {string}  text
-   * @returns {boolean} true if at least one strategy appeared to succeed
-   */
   function injectIntoContentEditable(editor, text) {
-    // Focus and select all existing content first
     editor.focus();
     fireKeyEvent(editor, 'keydown', { key: 'a', ctrlKey: true, metaKey: true });
     document.execCommand('selectAll');
 
-    // ── Strategy A: execCommand insertText ───────────────
-    // This is the cleanest path — it works with Slate, ProseMirror, and
-    // most rich-text editors because it goes through the browser's editing
-    // pipeline rather than directly mutating the DOM.
     const execResult = document.execCommand('insertText', false, text);
     console.log(`[OmniFlow][Content] execCommand('insertText') result: ${execResult}`);
-
     if (execResult) return true;
 
-    // ── Strategy B: Synthetic paste event ────────────────
     console.log('[OmniFlow][Content] execCommand failed — trying paste event strategy.');
     try {
       const dt = new DataTransfer();
       dt.setData('text/plain', text);
       const pasteEvent = new ClipboardEvent('paste', {
-        bubbles: true,
-        cancelable: true,
-        clipboardData: dt,
+        bubbles: true, cancelable: true, clipboardData: dt,
       });
-      // Clear first
       editor.textContent = '';
       editor.dispatchEvent(pasteEvent);
-
-      // Fire input event so listeners pick up the change
       editor.dispatchEvent(new InputEvent('input', {
-        bubbles: true,
-        cancelable: true,
-        inputType: 'insertFromPaste',
-        data: text,
+        bubbles: true, cancelable: true, inputType: 'insertFromPaste', data: text,
       }));
     } catch (e) {
       console.warn('[OmniFlow][Content] Paste strategy error:', e);
     }
 
-    // ── Strategy C: Direct assignment + React-style events ──
     console.log('[OmniFlow][Content] Trying direct innerText assignment strategy.');
     try {
-      // Move caret to end and select all
       const range = document.createRange();
       range.selectNodeContents(editor);
       const sel = window.getSelection();
       sel.removeAllRanges();
       sel.addRange(range);
-
-      // Direct assignment — works for non-React editors
       editor.innerText = text;
-
-      // Re-focus and fire events so frameworks react
       editor.focus();
       fireKeyEvent(editor, 'keydown', { key: 'Process', bubbles: true });
       editor.dispatchEvent(new InputEvent('input', {
-        bubbles: true,
-        cancelable: true,
-        inputType: 'insertText',
-        data: text,
+        bubbles: true, cancelable: true, inputType: 'insertText', data: text,
       }));
       editor.dispatchEvent(new Event('change', { bubbles: true }));
       fireKeyEvent(editor, 'keyup', { key: 'Process', bubbles: true });
@@ -279,20 +210,11 @@
       console.warn('[OmniFlow][Content] Direct assignment strategy error:', e);
     }
 
-    return false; // caller will verify via readEditorText
+    return false;
   }
 
-  /**
-   * Inject text into a standard textarea or input element.
-   * Uses the React-compatible nativeInputValueSetter trick so
-   * React's synthetic event system sees the change.
-   * @param {Element} editor
-   * @param {string}  text
-   */
   function injectIntoTextarea(editor, text) {
     editor.focus();
-
-    // Use React's internal setter if available (works with React-controlled inputs)
     const nativeInputSetter = Object.getOwnPropertyDescriptor(
       window.HTMLTextAreaElement.prototype, 'value'
     )?.set || Object.getOwnPropertyDescriptor(
@@ -304,33 +226,20 @@
     } else {
       editor.value = text;
     }
-
-    // Fire React-compatible events
     editor.dispatchEvent(new Event('input',  { bubbles: true }));
     editor.dispatchEvent(new Event('change', { bubbles: true }));
     console.log('[OmniFlow][Content] textarea/input value set via nativeSetter.');
   }
 
-  /**
-   * Main injection entry point.
-   * @param {string} text — the text to inject
-   * @returns {{ success: boolean, text: string, error?: string }}
-   */
   function performInjection(text) {
     console.log(`[OmniFlow][Content] Starting injection. Text: "${text}"`);
 
-    // ── Step 1: Find editor ───────────────────────────────
     const editor = findEditor();
     if (!editor) {
-      return {
-        success: false,
-        text: '',
-        error: 'Editor not found. Make sure you are on a Flow/Omni editor page.',
-      };
+      return { success: false, text: '', error: 'Editor not found. Make sure you are on a Flow/Omni editor page.' };
     }
     console.log('[OmniFlow][Content] Editor found ✓');
 
-    // ── Step 2: Focus ─────────────────────────────────────
     try {
       editor.focus();
       console.log('[OmniFlow][Content] Editor focused ✓');
@@ -338,12 +247,9 @@
       return { success: false, text: '', error: `Focus failed: ${e.message}` };
     }
 
-    // ── Step 3: Inject ────────────────────────────────────
     try {
       const isContentEditable =
-        editor.getAttribute('contenteditable') === 'true' ||
-        editor.isContentEditable;
-
+        editor.getAttribute('contenteditable') === 'true' || editor.isContentEditable;
       if (isContentEditable) {
         console.log('[OmniFlow][Content] Using contenteditable injection path.');
         injectIntoContentEditable(editor, text);
@@ -356,39 +262,28 @@
       return { success: false, text: '', error: `Injection failed: ${e.message}` };
     }
 
-    // ── Step 4: Verify ────────────────────────────────────
-    // Small delay to allow the framework to process the events before we read
-    // Note: We can't use setTimeout here (sync context), so we read immediately.
-    // If frameworks are async, the text may not be updated yet — we still report
-    // what we can read. In practice execCommand is synchronous in Slate.
     const detected = readEditorText(editor).trim();
     console.log(`[OmniFlow][Content] Verification — detected text: "${detected}"`);
 
-    const verified = detected === text.trim();
-    if (verified) {
+    if (detected === text.trim()) {
       console.log('[OmniFlow][Content] Verification PASSED ✓');
     } else {
-      // Not necessarily a failure — some editors update asynchronously.
-      // We still return success=true if injection ran without errors, but
-      // we surface the detected text so the popup can show it.
       console.warn(
         `[OmniFlow][Content] Text mismatch: expected "${text}" got "${detected}". ` +
         'This may be normal for async frameworks — check the editor visually.'
       );
     }
 
-    return {
-      success: true, // injection ran; popup shows detected text for visual confirmation
-      text: detected || text, // fall back to intended text if editor hasn't updated yet
-    };
+    return { success: true, text: detected || text };
   }
 
   // ════════════════════════════════════════════════════════
-  //  PHASE 2 — GENERATE BUTTON DETECTION & CLICK
+  //  PHASE 2.1 — GENERATE BUTTON DETECTION & CLICK
+  //  Scope: composer container only. Never scans the global page.
   // ════════════════════════════════════════════════════════
 
   /**
-   * Check if a button element is visible and not disabled.
+   * Check if a button-like element is visible and not disabled.
    * @param {Element} el
    * @returns {boolean}
    */
@@ -400,132 +295,111 @@
   }
 
   /**
-   * Locate the Generate / Create / Submit button using a 4-strategy cascade.
+   * Find the generate button using a composer-scoped approach:
    *
-   * Strategy 1 — Text/icon match: any button whose textContent contains
-   *   'arrow_forward' (the Material icon name Flow uses), or common labels.
-   * Strategy 2 — Proximity: buttons that share a DOM ancestor with the
-   *   Slate editor (prompt-bar container).
-   * Strategy 3 — Geometric: the usable button whose left edge is immediately
-   *   to the right of the editor's right edge.
-   * Strategy 4 — Last resort: the last visible, enabled button on the page.
+   *  1. Locate the Slate prompt editor.
+   *  2. Walk upward through the DOM to find the tightest ancestor
+   *     ("composer container") that contains at least one usable button.
+   *     STOP there — never search beyond this container.
+   *  3. Collect all usable buttons inside the composer only.
+   *  4. Log every candidate before choosing.
+   *  5. Choose the rightmost keyword-matching button (keyword_rightmost).
+   *  6. If no keyword match, choose the rightmost button in the composer
+   *     (container_rightmost). No global page scanning. No last-resort fallback.
    *
    * @returns {{ button: Element|null, strategy: string, buttonText: string }}
    */
   function findGenerateButton() {
-    console.log('[OmniFlow][Generate] Searching for generate button…');
+    console.log('[OmniFlow][Generate] Searching for generate button inside composer…');
 
-    // Collect all button-like elements once
-    const allButtons = Array.from(document.querySelectorAll(
-      'button, [role="button"], input[type="submit"], input[type="button"]'
-    ));
+    // ── Step 1: Locate the editor ─────────────────────────
+    const editor = findEditor();
+    if (!editor) {
+      console.warn('[OmniFlow][Generate] Cannot find generate button — editor not found.');
+      return { button: null, strategy: 'none', buttonText: '' };
+    }
 
-    // ── Strategy 1: text/icon content match ──────────────
+    // ── Step 2: Walk up to the composer container ─────────
+    // The composer container is the tightest ancestor that holds
+    // at least one usable button. We stop at the first such ancestor
+    // and never go wider — buttons outside it are never considered.
+    let composerContainer = null;
+    let ancestor = editor.parentElement;
+
+    while (ancestor && ancestor !== document.body) {
+      const buttonsInAncestor = Array.from(
+        ancestor.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"]')
+      ).filter(isButtonUsable);
+
+      if (buttonsInAncestor.length > 0) {
+        composerContainer = ancestor;
+        break;
+      }
+      ancestor = ancestor.parentElement;
+    }
+
+    if (!composerContainer) {
+      console.warn('[OmniFlow][Generate] No composer container with usable buttons found.');
+      return { button: null, strategy: 'none', buttonText: '' };
+    }
+
+    console.log(
+      `[OmniFlow][Generate] Composer container: <${composerContainer.tagName.toLowerCase()}> ` +
+      `class="${composerContainer.className}"`
+    );
+
+    // ── Step 3: Collect all usable buttons inside composer ─
+    const composerButtons = Array.from(
+      composerContainer.querySelectorAll('button, [role="button"], input[type="submit"], input[type="button"]')
+    ).filter(isButtonUsable);
+
+    // ── Step 4: Log every candidate before choosing ───────
+    console.log(`[OmniFlow][Generate] ${composerButtons.length} usable button(s) inside composer:`);
+    composerButtons.forEach((btn, i) => {
+      const txt  = btn.textContent.trim() || btn.getAttribute('aria-label') || btn.getAttribute('type') || '(no text)';
+      const rect = btn.getBoundingClientRect();
+      const tag  = btn.tagName.toLowerCase();
+      const role = btn.getAttribute('role') || '';
+      console.log(
+        `[OmniFlow][Generate]   [${i + 1}] <${tag}>${role ? ` role="${role}"` : ''} ` +
+        `text="${txt}" left=${Math.round(rect.left)} right=${Math.round(rect.right)}`
+      );
+    });
+
+    // ── Step 5: Prefer keyword-matching button (rightmost) ─
     const GENERATE_LABELS = [
-      'arrow_forward',
-      'generate',
-      'create',
-      'submit',
-      'run',
-      'send',
-      'go',
+      'arrow_forward', 'generate', 'create', 'submit', 'run', 'send', 'go',
     ];
 
-    for (const btn of allButtons) {
-      if (!isButtonUsable(btn)) continue;
-      const text = (btn.textContent || btn.value || btn.getAttribute('aria-label') || '').trim().toLowerCase();
-      const matched = GENERATE_LABELS.find(label => text.includes(label));
-      if (matched) {
-        const displayText = btn.textContent.trim() || btn.getAttribute('aria-label') || matched;
-        console.log(`[OmniFlow][Generate] Strategy #1 succeeded: found “${displayText}”`);
-        return { button: btn, strategy: 'arrow_forward_text', buttonText: displayText };
-      }
-    }
-    console.log('[OmniFlow][Generate] Strategy #1: no match.');
+    const keywordButtons = composerButtons.filter(btn => {
+      const text = (
+        btn.textContent || btn.value || btn.getAttribute('aria-label') || ''
+      ).trim().toLowerCase();
+      return GENERATE_LABELS.some(label => text.includes(label));
+    });
 
-    // ── Strategy 2: shared container with editor ─────────
-    const editor = findEditor();
-    if (editor) {
-      // Walk up to find the prompt bar — the nearest ancestor that also
-      // contains at least one button.
-      let ancestor = editor.parentElement;
-      while (ancestor && ancestor !== document.body) {
-        const containerButtons = Array.from(
-          ancestor.querySelectorAll('button, [role="button"]')
-        ).filter(isButtonUsable);
-
-        if (containerButtons.length > 0) {
-          // Among these, prefer rightmost (by bounding box)
-          containerButtons.sort((a, b) => {
-            const ra = a.getBoundingClientRect();
-            const rb = b.getBoundingClientRect();
-            return rb.right - ra.right; // descending — rightmost first
-          });
-          const btn = containerButtons[0];
-          const displayText = btn.textContent.trim() || btn.getAttribute('aria-label') || 'button';
-          console.log(`[OmniFlow][Generate] Strategy #2 succeeded: rightmost button in prompt container “${displayText}”`);
-          return { button: btn, strategy: 'prompt_container_rightmost', buttonText: displayText };
-        }
-        ancestor = ancestor.parentElement;
-      }
-    }
-    console.log('[OmniFlow][Generate] Strategy #2: no match.');
-
-    // ── Strategy 3: geometric — button immediately right of editor ──
-    if (editor) {
-      const editorRect = editor.getBoundingClientRect();
-      const TOLERANCE  = 120; // px — how far right of editor we look
-
-      const geometricMatch = allButtons
-        .filter(isButtonUsable)
-        .filter(btn => {
-          const r = btn.getBoundingClientRect();
-          // Button's left edge must be >= editor's right edge (within tolerance)
-          // and vertically overlapping with the editor
-          return (
-            r.left  >= editorRect.right - 20 &&
-            r.left  <= editorRect.right + TOLERANCE &&
-            r.bottom >= editorRect.top &&
-            r.top   <= editorRect.bottom
-          );
-        })
-        // Take the closest one (smallest horizontal gap)
-        .sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
-
-      if (geometricMatch.length > 0) {
-        const btn = geometricMatch[0];
-        const displayText = btn.textContent.trim() || btn.getAttribute('aria-label') || 'button';
-        console.log(`[OmniFlow][Generate] Strategy #3 succeeded: geometric proximity “${displayText}”`);
-        return { button: btn, strategy: 'geometric_right_of_editor', buttonText: displayText };
-      }
-    }
-    console.log('[OmniFlow][Generate] Strategy #3: no match.');
-
-    // ── Strategy 4: last visible enabled button on page ──
-    const usableButtons = allButtons.filter(isButtonUsable);
-    if (usableButtons.length > 0) {
-      // Pick the one with the rightmost + lowest position (typical submit position)
-      usableButtons.sort((a, b) => {
-        const ra = a.getBoundingClientRect();
-        const rb = b.getBoundingClientRect();
-        // Combined score: bottom + right position
-        return (rb.bottom + rb.right) - (ra.bottom + ra.right);
-      });
-      const btn = usableButtons[0];
+    if (keywordButtons.length > 0) {
+      keywordButtons.sort((a, b) => b.getBoundingClientRect().right - a.getBoundingClientRect().right);
+      const btn         = keywordButtons[0];
       const displayText = btn.textContent.trim() || btn.getAttribute('aria-label') || 'button';
-      console.log(`[OmniFlow][Generate] Strategy #4 succeeded (last resort): “${displayText}”`);
-      return { button: btn, strategy: 'last_visible_button', buttonText: displayText };
+      console.log(`[OmniFlow][Generate] Strategy: keyword_rightmost — chose "${displayText}"`);
+      return { button: btn, strategy: 'keyword_rightmost', buttonText: displayText };
     }
 
-    console.warn('[OmniFlow][Generate] All 4 strategies failed. No generate button found.');
-    return { button: null, strategy: 'none', buttonText: '' };
+    // ── Step 6: Fallback — rightmost button inside composer ─
+    // Still 100% scoped inside the composer. No global page scan.
+    composerButtons.sort((a, b) => b.getBoundingClientRect().right - a.getBoundingClientRect().right);
+    const btn         = composerButtons[0];
+    const displayText = btn.textContent.trim() || btn.getAttribute('aria-label') || 'button';
+    console.log(`[OmniFlow][Generate] Strategy: container_rightmost — chose "${displayText}"`);
+    return { button: btn, strategy: 'container_rightmost', buttonText: displayText };
   }
 
   /**
    * Full Phase 2 automation:
    *   1. Find editor
    *   2. Inject prompt text
-   *   3. Find generate button
+   *   3. Find generate button (composer-scoped)
    *   4. Click it
    *   5. Return structured result
    *
@@ -583,7 +457,7 @@
     result.buttonText   = buttonText;
 
     if (!button) {
-      result.error = 'Generate button not found after trying all 4 strategies.';
+      result.error = 'Generate button not found inside composer container.';
       return result;
     }
     result.buttonFound = true;
@@ -595,7 +469,7 @@
       button.focus();
       button.click();
 
-      // Fire pointer events for frameworks that intercept them
+      // Fire pointer/mouse events for frameworks that intercept them
       button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
       button.dispatchEvent(new MouseEvent('mousedown',    { bubbles: true, cancelable: true }));
       button.dispatchEvent(new MouseEvent('mouseup',      { bubbles: true, cancelable: true }));
