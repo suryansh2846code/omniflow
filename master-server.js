@@ -28,6 +28,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OmniFlow — Master Pipeline</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -682,6 +683,19 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && pathname === '/') {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(HTML_CONTENT);
+    return;
+  }
+
+  // Serve favicon
+  if (req.method === 'GET' && pathname === '/favicon.png') {
+    const filePath = path.join(process.cwd(), 'favicon.png');
+    if (fs.existsSync(filePath)) {
+      res.writeHead(200, { 'Content-Type': 'image/png' });
+      fs.createReadStream(filePath).pipe(res);
+    } else {
+      res.writeHead(404);
+      res.end('Not found');
+    }
     return;
   }
 
