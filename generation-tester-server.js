@@ -382,6 +382,10 @@ const HTML_CONTENT = `<!DOCTYPE html>
       <button id="runBtn" class="btn-primary">
         <span>🚀 Start Browser Automation</span>
       </button>
+
+      <button id="mockMergeBtn" class="btn-primary" style="background: var(--warning); margin-top: 10px;">
+        <span>🧪 Test Merger (Mock Data)</span>
+      </button>
     </section>
 
     <!-- Workspace Logging & Results -->
@@ -410,6 +414,7 @@ const HTML_CONTENT = `<!DOCTYPE html>
     const useSampleCheckbox = document.getElementById('useSample');
     const videoPathGroup = document.getElementById('videoPathGroup');
     const runBatchCheckbox = document.getElementById('runBatch');
+    const mockMergeBtn = document.getElementById('mockMergeBtn');
 
     useSampleCheckbox.addEventListener('change', () => {
       if (useSampleCheckbox.checked) {
@@ -519,61 +524,151 @@ const HTML_CONTENT = `<!DOCTYPE html>
 
       runBtn.disabled = true;
       resultsContainer.innerHTML = '';
-      setStatus('running', isBatch ? 'Automating 3 Tabs...' : 'Automating...');
+      setStatus('running', isBatch ? 'Automating (Parallel)...' : 'Automating...');
       consoleBox.innerHTML = '';
 
-      const tasks = isBatch ? [1, 2, 3] : [1];
-      let completed = 0;
       let hasError = false;
+      const downloadedPaths = [];
+      const tasks = isBatch ? [1, 2, 3] : [1];
 
-      tasks.forEach(index => {
-        const clipId = isBatch ? baseClipId + "_" + index : baseClipId;
-        const currentPrompt = isBatch ? prompt + " (Variation " + index + ")" : prompt;
-        const currentVideoPath = videoPath; // backend handles sample generation via sampleIndex
-        
-        log(\`[Client] Starting SSE event listener for \${clipId}...\`, 'system');
-        
-        const params = new URLSearchParams({ clipId, videoPath: currentVideoPath, prompt: currentPrompt, geminiUrl, chromePort, useSample, sampleIndex: index });
-        const sse = new EventSource(\`/api/run-stream?\${params.toString()}\`);
-
-        sse.onmessage = (event) => {
-          try {
-            const payload = JSON.parse(event.data);
-            if (payload.type === 'log') {
-              let styleClass = 'info';
-              const text = \`[\${clipId}] \${payload.data}\`;
-              if (text.includes('success') || text.includes('complete') || text.includes('verified')) {
-                styleClass = 'success';
-              } else if (text.includes('warn')) {
-                styleClass = 'warn';
-              }
-              log(text, styleClass);
-            } else if (payload.type === 'error') {
-              log(\`[\${clipId}] \${payload.data}\`, 'error');
-              hasError = true;
-            } else if (payload.type === 'result') {
-              createResultCard(index);
-              renderResult(payload.data, index);
-            }
-          } catch (err) {
-            log('Error parsing event data: ' + err.message, 'error');
-          }
-        };
-
-        sse.onerror = (err) => {
-          sse.close();
-          completed++;
+      // Run all tasks in parallel
+      const runningPromises = tasks.map(index => {
+        return new Promise((resolve) => {
+          const clipId = isBatch ? baseClipId + "_" + index : baseClipId;
+          const currentPrompt = isBatch ? prompt + " (Variation " + index + ")" : prompt;
+          const currentVideoPath = videoPath;
           
-          if (completed === tasks.length) {
-             runBtn.disabled = false;
-             if (hasError) {
-               setStatus('error', 'Failed');
-             } else {
-               setStatus('success', 'Completed');
-             }
-          }
-        };
+          log(\`[Client] Starting SSE event listener for \${clipId}...\`, 'system');
+          
+          const params = new URLSearchParams({ clipId, videoPath: currentVideoPath, prompt: currentPrompt, geminiUrl, chromePort, useSample, sampleIndex: index });
+          const sse = new EventSource(\`/api/run-stream?\${params.toString()}\`);
+
+          sse.onmessage = (event) => {
+            try {
+              const payload = JSON.parse(event.data);
+              if (payload.type === 'log') {
+                let styleClass = 'info';
+                const text = \`[\${clipId}] \${payload.data}\`;
+                if (text.includes('success') || text.includes('complete') || text.includes('verified')) {
+                  styleClass = 'success';
+                } else if (text.includes('warn')) {
+                  styleClass = 'warn';
+                }
+                log(text, styleClass);
+              } else if (payload.type === 'error') {
+                log(\`[\${clipId}] \${payload.data}\`, 'error');
+                hasError = true;
+              } else if (payload.type === 'result') {
+                createResultCard(index);
+                renderResult(payload.data, index);
+                if (payload.data.downloadedPath) {
+                  downloadedPaths.push(payload.data.downloadedPath);
+                }
+              }
+            } catch (err) {
+              log('Error parsing event data: ' + err.message, 'error');
+            }
+          };
+
+          sse.onerror = () => {
+            sse.close();
+            resolve();
+          };
+        });
       });
+
+      Promise.all(runningPromises).then(async () => {
+        runBtn.disabled = false;
+        if (hasError) {
+          setStatus('error', 'Failed');
+        } else {
+          setStatus('success', 'Completed');
+          
+          if (isBatch && downloadedPaths.length > 1) {
+            log('[Client] Triggering post-generation merge process...', 'system');
+            try {
+              const mergeRes = await fetch('/api/merge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ inputPaths: downloadedPaths.sort() })
+              });
+              const mergeData = await mergeRes.json();
+              if (mergeData.success) {
+                log('[Client] Successfully merged videos into: ' + mergeData.finalPath, 'success');
+                
+                // Display Final Video Link
+                const card = document.createElement('div');
+                card.className = 'results-card';
+                card.style.display = 'flex';
+                card.innerHTML = \`
+                  <div class="panel-title" style="color: var(--primary);">🎬 Final Merged Video</div>
+                  <div class="result-item">
+                    <span class="result-label">Local Path</span>
+                    <span class="result-val" style="word-break: break-all;">\${mergeData.finalPath}</span>
+                  </div>
+                \`;
+                resultsContainer.appendChild(card);
+                
+              } else {
+                log('[Client] Merge failed: ' + mergeData.error, 'error');
+              }
+            } catch (e) {
+              log('[Client] Merge request error: ' + e.message, 'error');
+            }
+          }
+        }
+      });
+    });
+
+    mockMergeBtn.addEventListener('click', async () => {
+      mockMergeBtn.disabled = true;
+      runBtn.disabled = true;
+      resultsContainer.innerHTML = '';
+      consoleBox.innerHTML = '';
+      setStatus('running', 'Generating Mock Clips...');
+      log('[Client] Triggering generation of mock clips...', 'system');
+      try {
+        const res = await fetch('/api/generate-mock-clips', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          log('[Client] Mock clips generated. Triggering actual /api/merge endpoint...', 'system');
+          
+          const downloadedPaths = data.mockPaths;
+          const mergeRes = await fetch('/api/merge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ inputPaths: downloadedPaths.sort() })
+          });
+          
+          const mergeData = await mergeRes.json();
+          if (mergeData.success) {
+            log('[Client] Successfully merged videos into: ' + mergeData.finalPath, 'success');
+            const card = document.createElement('div');
+            card.className = 'results-card';
+            card.style.display = 'flex';
+            card.innerHTML = \`
+              <div class="panel-title" style="color: var(--primary);">🎬 Final Merged Video (Mocked)</div>
+              <div class="result-item">
+                <span class="result-label">Local Path</span>
+                <span class="result-val" style="word-break: break-all;">\${mergeData.finalPath}</span>
+              </div>
+            \`;
+            resultsContainer.appendChild(card);
+            setStatus('success', 'Merge Complete');
+          } else {
+            log('[Client] Merge failed: ' + mergeData.error, 'error');
+            setStatus('error', 'Failed');
+          }
+        } else {
+          log('[Client] Mock generation failed: ' + data.error, 'error');
+          setStatus('error', 'Failed');
+        }
+      } catch(e) {
+        log('[Client] Request error: ' + e.message, 'error');
+        setStatus('error', 'Failed');
+      }
+      mockMergeBtn.disabled = false;
+      runBtn.disabled = false;
     });
   </script>
 </body>
@@ -597,6 +692,61 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && pathname === '/') {
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(HTML_CONTENT);
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/merge') {
+    let body = '';
+    req.on('data', chunk => body += chunk.toString());
+    req.on('end', async () => {
+      try {
+        const { inputPaths } = JSON.parse(body);
+        const { PostProcessor } = await import('./video-intelligence/postProcessor.js');
+        const processor = new PostProcessor();
+        const outputPath = path.resolve('./omniflow-temp/final_merged.mp4');
+        const finalPath = await processor.mergeVideos(inputPaths, outputPath);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, finalPath }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/api/generate-mock-clips') {
+    (async () => {
+      try {
+        const { execSync } = await import('child_process');
+        const tempDir = path.resolve('./omniflow-temp');
+        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+        
+        const mockPaths = [];
+        const files = fs.readdirSync(tempDir);
+        const generatedClips = files.filter(f => f.endsWith('_generated.mp4')).map(f => path.join(tempDir, f));
+        
+        if (generatedClips.length >= 2) {
+          console.log('[Server] Found existing generated clips. Using them as mock data:', generatedClips);
+          mockPaths.push(...generatedClips);
+        } else {
+          console.log('[Server] Not enough generated clips found. Generating fallback colored mock clips...');
+          const colors = ['red', 'green', 'blue'];
+          for (let i = 0; i < 3; i++) {
+            const mockPath = path.join(tempDir, `mock_clip_${i+1}.mp4`);
+            execSync(`ffmpeg -y -f lavfi -i color=c=${colors[i]}:s=640x360:r=30:d=2 -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100:d=2 -c:v libx264 -c:a aac -shortest "${mockPath}"`, { stdio: 'ignore' });
+            mockPaths.push(mockPath);
+          }
+        }
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, mockPaths }));
+      } catch (err) {
+        console.error('[Server] Mock clip generation failed:', err);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    })();
     return;
   }
 
@@ -671,7 +821,8 @@ const server = http.createServer((req, res) => {
           clipId,
           videoPath: finalVideoPath,
           prompt,
-          geminiUrl
+          geminiUrl,
+          downloadOutputDir: path.resolve('./omniflow-temp')
         });
 
         sendEvent('result', result);

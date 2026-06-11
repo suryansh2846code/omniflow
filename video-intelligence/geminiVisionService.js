@@ -266,17 +266,36 @@ For the sceneTimeline array:
       }
     };
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestBody)
-    });
+    let response;
+    let retries = 3;
+    let delay = 2000;
 
-    if (!response.ok) {
+    while (retries > 0) {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (response.ok) {
+        break;
+      }
+
       const errorText = await response.text();
-      throw new Error(`Gemini API request failed with status ${response.status}: ${errorText}`);
+      if (response.status === 503) {
+        console.warn(`[GeminiVisionService] 503 Service Unavailable. Retrying in ${delay}ms... (${retries} retries left)`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        retries--;
+        delay *= 2;
+      } else {
+        throw new Error(`Gemini API request failed with status ${response.status}: ${errorText}`);
+      }
+    }
+
+    if (!response || !response.ok) {
+      throw new Error(`Gemini API request failed after retries. Last status ${response?.status}`);
     }
 
     const data = await response.json();

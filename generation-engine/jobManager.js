@@ -2,6 +2,7 @@ import { TabManager } from './tabManager.js';
 import { UploadManager } from './uploadManager.js';
 import { PromptInjector } from './promptInjector.js';
 import { GenerationMonitor } from './generationMonitor.js';
+import { DownloadManager } from './downloadManager.js';
 
 export class JobManager {
   constructor(options = {}) {
@@ -15,9 +16,10 @@ export class JobManager {
    * @param {string} jobConfig.videoPath
    * @param {string} jobConfig.prompt
    * @param {string} [jobConfig.geminiUrl="https://gemini.google.com"]
+   * @param {string} [jobConfig.downloadOutputDir]
    */
   async runJob(jobConfig) {
-    const { clipId, videoPath, prompt, geminiUrl = 'https://gemini.google.com' } = jobConfig;
+    const { clipId, videoPath, prompt, geminiUrl = 'https://gemini.google.com', downloadOutputDir } = jobConfig;
     console.log(`[JobManager] Starting job for Clip: ${clipId}`);
 
     const tabManager = new TabManager(this.options);
@@ -64,6 +66,17 @@ export class JobManager {
       const monitorResult = await monitor.monitor();
       status.generationCompleted = monitorResult.generationCompleted;
       status.videoUrl = monitorResult.videoUrl;
+
+      if (status.generationCompleted && status.videoUrl && downloadOutputDir) {
+        console.log(`[JobManager] Downloading generated video for ${clipId}...`);
+        const downloadManager = new DownloadManager(client, this.options);
+        const downloadedPath = await downloadManager.downloadVideo(
+          status.videoUrl, 
+          downloadOutputDir, 
+          `${clipId}_generated.mp4`
+        );
+        status.downloadedPath = downloadedPath;
+      }
 
       console.log(`[JobManager] Job completed successfully for Clip: ${clipId}`);
     } catch (err) {

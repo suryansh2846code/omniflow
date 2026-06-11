@@ -1,5 +1,7 @@
 import path from 'path';
 
+let fileChooserMutex = Promise.resolve();
+
 export class UploadManager {
   constructor(client, options = {}) {
     this.client = client;
@@ -13,6 +15,44 @@ export class UploadManager {
   async upload(videoPath) {
     const absolutePath = path.resolve(videoPath);
     console.log(`[UploadManager] Preparing upload for: ${absolutePath}`);
+
+    // Acquire global mutex to prevent concurrent file chooser dialogs across tabs
+    let releaseLock;
+    const nextLock = new Promise(resolve => { releaseLock = resolve; });
+    const prevLock = fileChooserMutex;
+    
+    // Ensure the mutex chain never stores a rejected promise
+    fileChooserMutex = prevLock.then(() => nextLock, () => nextLock);
+    
+    try {
+      await prevLock;
+    } catch (e) {
+      // Ignore errors from the previous lock holder
+    }
+    
+    try {
+      await this._triggerAndInject(absolutePath);
+    } finally {
+      releaseLock();
+    }
+
+    console.log("[UploadManager] File injected. Monitoring upload completion...");
+
+    // 6. Monitor completion
+    const uploadCompleted = await this.waitForUploadCompletion();
+    if (!uploadCompleted) {
+      console.warn("[UploadManager] Upload completion monitoring timed out or didn't find clear confirmation, but file was injected.");
+    } else {
+      console.log("[UploadManager] Video clip uploaded successfully.");
+    }
+    
+    return true;
+  }
+
+  async _triggerAndInject(absolutePath) {
+    // 0. Bring page to front so mouse events work reliably
+    await this.client.send('Page.bringToFront');
+    await new Promise(r => setTimeout(r, 1000));
 
     // 1. Intercept file chooser
     await this.client.send('Page.enable');
@@ -118,18 +158,6 @@ export class UploadManager {
     });
     
     await this.client.send('Page.setInterceptFileChooserDialog', { enabled: false });
-
-    console.log("[UploadManager] File injected. Monitoring upload completion...");
-
-    // 6. Monitor completion
-    const uploadCompleted = await this.waitForUploadCompletion();
-    if (!uploadCompleted) {
-      console.warn("[UploadManager] Upload completion monitoring timed out or didn't find clear confirmation, but file was injected.");
-    } else {
-      console.log("[UploadManager] Video clip uploaded successfully.");
-    }
-    
-    return true;
   }
 
   async waitForUploadCompletion() {
