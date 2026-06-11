@@ -198,36 +198,17 @@ export class GeminiService {
       }
     };
 
-    let response;
-    let retries = 3;
-    let delay = 2000; // 2 seconds initial delay
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    });
 
-    while (retries > 0) {
-      response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestBody)
-      });
-
-      if (response.ok) {
-        break; // Success
-      }
-
+    if (!response.ok) {
       const errorText = await response.text();
-      if (response.status === 503) {
-        console.warn(`[GeminiService] 503 Service Unavailable. Retrying in ${delay}ms... (${retries} retries left)`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-        retries--;
-        delay *= 2; // Exponential backoff
-      } else {
-        throw new Error(`Gemini API request failed with status ${response.status}: ${errorText}`);
-      }
-    }
-
-    if (!response || !response.ok) {
-      throw new Error(`Gemini API request failed after retries. Last status ${response?.status}`);
+      throw new Error(`Gemini API request failed with status ${response.status}: ${errorText}`);
     }
 
     const data = await response.json();

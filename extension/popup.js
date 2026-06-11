@@ -1,998 +1,203 @@
-// ─────────────────────────────────────────────────────────
-// OmniFlow — popup.js
-// Orchestrates: tab query → content script injection →
-// result rendering.
-// ─────────────────────────────────────────────────────────
+const API_BASE = 'http://localhost:3007';
 
-// ── DOM refs ──────────────────────────────────────────────
-const testBtn         = document.getElementById('testBtn');
-const statusDot       = document.getElementById('statusDot');
-const valUrl          = document.getElementById('valUrl');
-const valTitle        = document.getElementById('valTitle');
-const valCount        = document.getElementById('valCount');
-const cardUrl         = document.getElementById('cardUrl');
-const cardTitle       = document.getElementById('cardTitle');
-const cardCount       = document.getElementById('cardCount');
-const candidatesWrap  = document.getElementById('candidatesWrap');
-const candidatesList  = document.getElementById('candidatesList');
-const errorBanner     = document.getElementById('errorBanner');
-const errorMsg        = document.getElementById('errorMsg');
-const logToggle       = document.getElementById('logToggle');
-const toggleArrow     = document.getElementById('toggleArrow');
-const logBox          = document.getElementById('logBox');
+document.addEventListener('DOMContentLoaded', () => {
+  const fileInput = document.getElementById('videoFile');
+  const fileLabel = document.getElementById('fileLabel');
+  const promptInput = document.getElementById('promptInput');
+  const apiKeyInput = document.getElementById('apiKeyInput');
+  const chromePortInput = document.getElementById('chromePortInput');
+  const startBtn = document.getElementById('startBtn');
+  const trackerPanel = document.getElementById('trackerPanel');
+  const inputPanel = document.getElementById('inputPanel');
+  const resultPanel = document.getElementById('resultPanel');
+  const logOutput = document.getElementById('logOutput');
 
-// Phase 1 refs
-const injectBtn       = document.getElementById('injectBtn');
-const injectPanel     = document.getElementById('injectPanel');
-const injectBadge     = document.getElementById('injectBadge');
-const injectTextRow   = document.getElementById('injectTextRow');
-const injectTextValue = document.getElementById('injectTextValue');
+  let generatedClipsExpected = 0;
+  let generatedClipsFound = [];
 
-// Phase 2 refs
-const generateBtn      = document.getElementById('generateBtn');
-const generatePanel    = document.getElementById('generatePanel');
-const genEditorFound   = document.getElementById('genEditorFound');
-const genPromptInjected = document.getElementById('genPromptInjected');
-const genButtonFound   = document.getElementById('genButtonFound');
-const genButtonClicked = document.getElementById('genButtonClicked');
-const genPromptAccepted = document.getElementById('genPromptAccepted');
-const genGenerationStarted = document.getElementById('genGenerationStarted');
-const genGenerationCompleted = document.getElementById('genGenerationCompleted');
-const genStrategy      = document.getElementById('genStrategy');
-const genButtonText    = document.getElementById('genButtonText');
-
-// Phase 2.2 refs
-const inspectBtn           = document.getElementById('inspectBtn');
-const composerInspectPanel = document.getElementById('composerInspectPanel');
-const inspectComposerFound = document.getElementById('inspectComposerFound');
-const inspectButtonsFound  = document.getElementById('inspectButtonsFound');
-const inspectButtonsWrap   = document.getElementById('inspectButtonsWrap');
-const inspectButtonsList   = document.getElementById('inspectButtonsList');
-
-// Phase 3 refs
-const generationStatusPanel = document.getElementById('generationStatusPanel');
-const statusStateBadge      = document.getElementById('statusStateBadge');
-const statusTimerVal        = document.getElementById('statusTimerVal');
-
-// Poll interval ID
-let statusPollIntervalId = null;
-
-// ── Log helpers ───────────────────────────────────────────
-/**
- * Append a line to the diagnostic log panel.
- * @param {string} text   - Message to log
- * @param {'info'|'ok'|'warn'|'error'} level
- */
-function log(text, level = 'info') {
-  const line = document.createElement('div');
-  line.className = `log-line log-${level}`;
-  const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
-  line.textContent = `${timestamp}  ${text}`;
-  logBox.appendChild(line);
-  logBox.scrollTop = logBox.scrollHeight;
-  console.log(`[OmniFlow][Popup] ${text}`);
-}
-
-// ── Status indicator ──────────────────────────────────────
-function setStatus(state) {
-  statusDot.className = 'status-dot';
-  if (state !== 'idle') statusDot.classList.add(state);
-}
-
-// ── UI state helpers ──────────────────────────────────────
-function showError(msg) {
-  errorBanner.classList.add('visible');
-  errorBanner.setAttribute('aria-hidden', 'false');
-  errorMsg.textContent = msg;
-  log(`Error: ${msg}`, 'error');
-  setStatus('error');
-}
-
-function clearError() {
-  errorBanner.classList.remove('visible');
-  errorBanner.setAttribute('aria-hidden', 'true');
-  errorMsg.textContent = '';
-}
-
-function setCardValue(el, value) {
-  el.textContent = value;
-}
-
-// ── Injection result helpers ────────────────────────────
-/**
- * Show the injection result panel.
- * @param {'success'|'failed'} status
- * @param {string} detectedText
- */
-function showInjectResult(status, detectedText) {
-  injectPanel.classList.add('visible');
-
-  // Reset badge classes
-  injectBadge.className = 'inject-badge';
-  injectBadge.classList.add(status);
-  injectBadge.textContent = status === 'success' ? '✓ SUCCESS' : '✗ FAILED';
-
-  injectTextValue.textContent = detectedText || '';
-  injectTextRow.style.display = detectedText ? 'flex' : 'none';
-}
-
-function hideInjectPanel() {
-  injectPanel.classList.remove('visible');
-  injectBadge.className = 'inject-badge';
-  injectBadge.textContent = '';
-  injectTextValue.textContent = '';
-}
-
-// ── Phase 2: generation panel helpers ───────────────────────
-/**
- * Set a gen-row value element with boolean styling.
- * @param {HTMLElement} el
- * @param {boolean|null} value  null = reset
- * @param {string} [trueLabel]  custom text when true
- * @param {string} [falseLabel] custom text when false
- */
-function setGenBool(el, value, trueLabel = 'yes', falseLabel = 'no') {
-  el.className = 'gen-row-val';
-  if (value === null) {
-    el.textContent = '—';
-    return;
-  }
-  el.classList.add(value ? 'val-true' : 'val-false');
-  el.textContent = value ? trueLabel : falseLabel;
-}
-
-/**
- * Populate the generation result panel with response data.
- * @param {Object} r - OMNIFLOW_GENERATE response
- */
-function renderGenerateResult(r) {
-  generatePanel.classList.add('visible');
-
-  setGenBool(genEditorFound,    r.editorFound,    '', '');
-  setGenBool(genPromptInjected, r.promptInjected, '', '');
-  setGenBool(genButtonFound,    r.buttonFound,    '', '');
-  setGenBool(genButtonClicked,  r.buttonClicked,  '', '');
-  setGenBool(genPromptAccepted, r.promptAccepted,  '', '');
-  setGenBool(genGenerationStarted, false,          '', '');
-  setGenBool(genGenerationCompleted, false,        '', '');
-
-  // Strategy
-  genStrategy.className = 'gen-row-val';
-  genStrategy.textContent = r.strategyUsed || '—';
-
-  // Button text / label
-  genButtonText.className = 'gen-row-val';
-  genButtonText.textContent = r.buttonText || '—';
-}
-
-function hideGeneratePanel() {
-  generatePanel.classList.remove('visible');
-  [
-    genEditorFound, genPromptInjected, genButtonFound, genButtonClicked,
-    genPromptAccepted, genGenerationStarted, genGenerationCompleted,
-    genStrategy, genButtonText
-  ].forEach(el => {
-    el.className = 'gen-row-val';
-    el.textContent = '—';
-  });
-}
-
-/**
- * Render the results of the Composer Inspection in the popup.
- * @param {Object} r - OMNIFLOW_INSPECT_COMPOSER response
- */
-function renderInspectResult(r) {
-  composerInspectPanel.classList.add('visible');
-  setGenBool(inspectComposerFound, r.composerFound, '', '');
-  
-  if (r.composerFound) {
-    inspectButtonsFound.className = 'inspect-row-val val-true';
-    inspectButtonsFound.textContent = r.buttonsCount || '0';
-    
-    inspectButtonsList.innerHTML = '';
-    if (r.buttons && r.buttons.length > 0) {
-      inspectButtonsWrap.style.display = 'flex';
-      r.buttons.forEach((btn) => {
-        const li = document.createElement('li');
-        li.className = 'inspect-button-item';
-        
-        const coords = `L:${btn.left} R:${btn.right} T:${btn.top} B:${btn.bottom}`;
-        const attrs = [
-          btn.role ? `role="${btn.role}"` : '',
-          btn.disabled ? 'disabled' : 'enabled'
-        ].filter(Boolean).join(' | ');
-
-        li.innerHTML = `
-          <div class="inspect-btn-title">
-            <span class="inspect-btn-name">#${btn.index} "${btn.text}"</span>
-            <span class="inspect-btn-tag">&lt;button&gt;</span>
-          </div>
-          <div class="inspect-btn-coords">${coords}</div>
-          <div class="inspect-btn-attrs">${attrs}</div>
-        `;
-        inspectButtonsList.appendChild(li);
-      });
-    } else {
-      inspectButtonsWrap.style.display = 'none';
-    }
+  // File input handler
+  fileInput.addEventListener('change', () => {
+  const file = fileInput.files[0];
+  if (file) {
+    fileLabel.textContent = `Selected: ${file.name} (${(file.size / (1024*1024)).toFixed(2)} MB)`;
+    checkForm();
   } else {
-    inspectButtonsFound.className = 'inspect-row-val';
-    inspectButtonsFound.textContent = '—';
-    inspectButtonsWrap.style.display = 'none';
-    inspectButtonsList.innerHTML = '';
-  }
-}
-
-function hideInspectPanel() {
-  composerInspectPanel.classList.remove('visible');
-  inspectComposerFound.className = 'inspect-row-val';
-  inspectComposerFound.textContent = '—';
-  inspectButtonsFound.className = 'inspect-row-val';
-  inspectButtonsFound.textContent = '—';
-  inspectButtonsWrap.style.display = 'none';
-  inspectButtonsList.innerHTML = '';
-}
-
-/**
- * Update the generation status panel elements.
- * @param {Object} s - status object { status, elapsedSeconds }
- */
-function updateStatusPanel(s) {
-  generationStatusPanel.classList.add('visible');
-  
-  statusStateBadge.className = 'status-state-badge';
-  
-  switch (s.status) {
-    case 'completed':
-      statusStateBadge.classList.add('badge-completed');
-      statusStateBadge.textContent = 'Completed';
-      break;
-    case 'generating':
-      statusStateBadge.classList.add('badge-generating');
-      statusStateBadge.textContent = 'Generating';
-      break;
-    case 'no_gen_detected':
-      statusStateBadge.classList.add('badge-no-gen');
-      statusStateBadge.textContent = 'No Generation Detected';
-      break;
-    case 'timeout':
-      statusStateBadge.classList.add('badge-timeout');
-      statusStateBadge.textContent = 'Timed Out';
-      break;
-    case 'waiting':
-    default:
-      statusStateBadge.classList.add('badge-waiting');
-      statusStateBadge.textContent = 'Waiting';
-      break;
-  }
-  
-  statusTimerVal.textContent = `${s.elapsedSeconds || 0}s`;
-
-  // Update generation test diagnostic badges
-  setGenBool(genPromptAccepted, s.promptAccepted !== undefined ? s.promptAccepted : null, '', '');
-  setGenBool(genGenerationStarted, s.generationStarted !== undefined ? s.generationStarted : null, '', '');
-  setGenBool(genGenerationCompleted, s.generationCompleted !== undefined ? s.generationCompleted : null, '', '');
-}
-
-function hideStatusPanel() {
-  generationStatusPanel.classList.remove('visible');
-  statusStateBadge.className = 'status-state-badge badge-waiting';
-  statusStateBadge.textContent = 'Waiting';
-  statusTimerVal.textContent = '0s';
-}
-
-/**
- * Starts polling the content script for generation status.
- * @param {number} tabId
- */
-function startStatusPolling(tabId) {
-  // Clear any existing poll
-  if (statusPollIntervalId) {
-    clearInterval(statusPollIntervalId);
-  }
-
-  log('[Popup] Generation started', 'ok');
-  updateStatusPanel({ status: 'waiting', elapsedSeconds: 0 });
-
-  // Disable UI buttons during generation
-  generateBtn.disabled = true;
-  injectBtn.disabled   = true;
-  testBtn.disabled     = true;
-  if (inspectBtn) inspectBtn.disabled = true;
-  setStatus('running');
-
-  statusPollIntervalId = setInterval(async () => {
-    try {
-      const status = await chrome.tabs.sendMessage(tabId, { type: 'OMNIFLOW_GET_STATUS' });
-      
-      if (!status) {
-        log('[Popup] Status check returned empty result', 'warn');
-        return;
-      }
-
-      if (status.logs && status.logs.length > 0) {
-        status.logs.forEach(l => {
-          log(l.text, l.type || 'info');
-        });
-      }
-
-      updateStatusPanel(status);
-      
-      if (status.status === 'no_gen_detected') {
-        log('[Popup] Generation aborted: No generation detected within 15 seconds.', 'warn');
-        showError('No generation detected. Check if prompt was sent.');
-        clearInterval(statusPollIntervalId);
-        statusPollIntervalId = null;
-        setStatus('error');
-        
-        generateBtn.disabled = false;
-        injectBtn.disabled   = false;
-        testBtn.disabled     = false;
-        if (inspectBtn) inspectBtn.disabled = false;
-      } else if (status.status === 'timeout') {
-        log('[Popup] Generation aborted: Timed out after 5 minutes.', 'error');
-        showError('Generation timed out (5-minute limit exceeded).');
-        clearInterval(statusPollIntervalId);
-        statusPollIntervalId = null;
-        setStatus('error');
-        
-        generateBtn.disabled = false;
-        injectBtn.disabled   = false;
-        testBtn.disabled     = false;
-        if (inspectBtn) inspectBtn.disabled = false;
-      } else if (status.status === 'completed') {
-        log('[Popup] Generation completed', 'ok');
-        clearInterval(statusPollIntervalId);
-        statusPollIntervalId = null;
-        setStatus('success');
-        
-        generateBtn.disabled = false;
-        injectBtn.disabled   = false;
-        testBtn.disabled     = false;
-        if (inspectBtn) inspectBtn.disabled = false;
-      }
-    } catch (err) {
-      log(`[Popup] Status check failed: ${err.message}`, 'error');
-      clearInterval(statusPollIntervalId);
-      statusPollIntervalId = null;
-      setStatus('error');
-      showError(`Status tracking error: ${err.message}`);
-      
-      generateBtn.disabled = false;
-      injectBtn.disabled   = false;
-      testBtn.disabled     = false;
-      if (inspectBtn) inspectBtn.disabled = false;
-    }
-  }, 1000);
-}
-
-function revealCards() {
-  [cardUrl, cardTitle, cardCount].forEach((card, i) => {
-    setTimeout(() => card.classList.add('visible'), i * 60);
-  });
-}
-
-// ── Confidence label ──────────────────────────────────────
-function confidenceClass(score) {
-  if (score >= 70) return 'high';
-  if (score >= 40) return 'medium';
-  return 'low';
-}
-
-function confidenceLabel(score) {
-  if (score >= 70) return '🟢 High';
-  if (score >= 40) return '🟡 Medium';
-  return '⚪ Low';
-}
-
-// ── Render candidates ─────────────────────────────────────
-/**
- * Render the ranked prompt-candidate list.
- * @param {Array<Object>} candidates
- */
-function renderCandidates(candidates) {
-  candidatesList.innerHTML = '';
-
-  if (!candidates || candidates.length === 0) {
-    candidatesWrap.classList.remove('visible');
-    log('No prompt candidates found on this page.', 'warn');
-    return;
-  }
-
-  candidatesWrap.classList.add('visible');
-  log(`Rendering ${candidates.length} candidate(s).`, 'ok');
-
-  candidates.forEach((c, index) => {
-    const li = document.createElement('li');
-    li.className = 'candidate-item';
-    li.style.animationDelay = `${index * 60}ms`;
-
-    const cls = confidenceClass(c.score);
-    const label = confidenceLabel(c.score);
-
-    // Build signal pills
-    const signals = [
-      { key: 'visible',        icon: '👁',  label: 'Visible'        },
-      { key: 'contenteditable', icon: '✏️',  label: 'ContentEditable' },
-      { key: 'hasPlaceholder', icon: '💬',  label: 'Placeholder'    },
-      { key: 'large',          icon: '📐',  label: 'Large'          },
-      { key: 'hasAriaLabel',   icon: '♿',  label: 'ARIA label'     },
-    ];
-
-    const pillsHtml = signals.map(s => {
-      const active = c.signals?.[s.key] ? 'active' : '';
-      return `<span class="signal-pill ${active}" title="${s.label}">${s.icon}</span>`;
-    }).join('');
-
-    // Meta tags: tag, id, type
-    const metaTags = [
-      c.tagName  ? `<span class="meta-tag highlight">&lt;${c.tagName}&gt;</span>` : '',
-      c.id       ? `<span class="meta-tag">#${c.id}</span>` : '',
-      c.type     ? `<span class="meta-tag">type="${c.type}"</span>` : '',
-      c.className ? `<span class="meta-tag">.${c.className.split(' ')[0]}</span>` : '',
-    ].filter(Boolean).join('');
-
-    li.innerHTML = `
-      <div class="candidate-header">
-        <span class="candidate-rank">Candidate #${index + 1}</span>
-        <span class="candidate-confidence confidence-${cls}">${label} (${c.score}%)</span>
-      </div>
-      <div class="candidate-meta">${metaTags}</div>
-      ${c.placeholder ? `<div class="candidate-signals" style="margin-bottom:4px;color:var(--text-muted)">
-        placeholder: "<em style="color:var(--text-primary)">${c.placeholder}</em>"
-      </div>` : ''}
-      ${c.ariaLabel ? `<div class="candidate-signals" style="margin-bottom:4px;color:var(--text-muted)">
-        aria-label: "<em style="color:var(--text-primary)">${c.ariaLabel}</em>"
-      </div>` : ''}
-      <div class="candidate-signals">Signals: ${pillsHtml}</div>
-    `;
-
-    candidatesList.appendChild(li);
-  });
-}
-
-testBtn.addEventListener('click', async () => {
-  // Reset UI
-  clearError();
-  hideInjectPanel();
-  hideGeneratePanel();
-  hideInspectPanel();
-  hideStatusPanel();
-  if (statusPollIntervalId) {
-    clearInterval(statusPollIntervalId);
-    statusPollIntervalId = null;
-  }
-  candidatesWrap.classList.remove('visible');
-  candidatesList.innerHTML = '';
-  [cardUrl, cardTitle, cardCount].forEach(c => c.classList.remove('visible'));
-  setCardValue(valUrl, '—');
-  setCardValue(valTitle, '—');
-  setCardValue(valCount, '—');
-
-  testBtn.disabled = true;
-  if (injectBtn) injectBtn.disabled = true;
-  if (generateBtn) generateBtn.disabled = true;
-  if (inspectBtn) inspectBtn.disabled = true;
-  setStatus('running');
-  log('[Popup] Test Omni clicked.', 'info');
-
-  try {
-    // ── 1. Get active tab ─────────────────────────────────
-    log('[Popup] Querying active tab…', 'info');
-
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-    if (!tab) {
-      showError('No active tab found.');
-      return;
-    }
-
-    log(`[Popup] Active tab: ${tab.url}`, 'info');
-
-    // Guard against restricted pages (chrome://, about:, etc.)
-    const restrictedPrefixes = ['chrome://', 'chrome-extension://', 'about:', 'edge://', 'brave://'];
-    const isRestricted = restrictedPrefixes.some(p => tab.url?.startsWith(p));
-
-    if (isRestricted) {
-      showError('Cannot access browser internal pages. Open a regular website and try again.');
-      return;
-    }
-
-    // ── 2. Inject content.js ──────────────────────────────
-    log('[Popup] Injecting content.js into tab…', 'info');
-
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ['content.js']
-      });
-      log('[Popup] content.js injected successfully.', 'ok');
-    } catch (injectErr) {
-      showError(`Injection failed: ${injectErr.message}`);
-      return;
-    }
-
-    // ── 3. Send scan command to content script ────────────
-    log('[Popup] Sending SCAN_PAGE message to content script…', 'info');
-
-    let result;
-    try {
-      result = await chrome.tabs.sendMessage(tab.id, { type: 'OMNIFLOW_SCAN' });
-    } catch (msgErr) {
-      showError(`Could not reach content script: ${msgErr.message}`);
-      return;
-    }
-
-    if (!result) {
-      showError('Content script returned no data.');
-      return;
-    }
-
-    if (result.error) {
-      showError(result.error);
-      return;
-    }
-
-    // ── 4. Render results ─────────────────────────────────
-    log('[Popup] Results received. Rendering UI…', 'ok');
-    log(`[Popup] Title: ${result.title}`, 'info');
-    log(`[Popup] URL: ${result.url}`, 'info');
-    log(`[Popup] Elements found: ${result.elementCount}`, 'info');
-    log(`[Popup] Candidates: ${result.candidates?.length ?? 0}`, 'ok');
-
-    setCardValue(valUrl, result.url || 'Unknown');
-    setCardValue(valTitle, result.title || 'Untitled');
-    setCardValue(valCount, result.candidates?.length ?? 0);
-    revealCards();
-    renderCandidates(result.candidates);
-
-    setStatus('success');
-    log('[Popup] Scan complete ✓', 'ok');
-
-  } catch (err) {
-    showError(`Unexpected error: ${err.message}`);
-  } finally {
-    testBtn.disabled = false;
-    if (injectBtn) injectBtn.disabled = false;
-    if (generateBtn) generateBtn.disabled = false;
-    if (inspectBtn) inspectBtn.disabled = false;
+    fileLabel.textContent = "Drag & drop source video";
+    startBtn.disabled = true;
   }
 });
 
-if (injectBtn) {
-  injectBtn.addEventListener('click', async () => {
-    clearError();
-    hideInjectPanel();
-    hideGeneratePanel();
-    hideInspectPanel();
-    hideStatusPanel();
-    if (statusPollIntervalId) {
-      clearInterval(statusPollIntervalId);
-      statusPollIntervalId = null;
-    }
+promptInput.addEventListener('input', checkForm);
 
-    injectBtn.disabled = true;
-    testBtn.disabled = true;
-    if (generateBtn) generateBtn.disabled = true;
-    if (inspectBtn) inspectBtn.disabled = true;
-    setStatus('running');
-    log('[Popup] Test Prompt Injection clicked.', 'info');
-
-    try {
-      // 1. Get active tab
-      log('[Popup] Querying active tab…', 'info');
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-      if (!tab) {
-        showError('No active tab found.');
-        return;
-      }
-
-      log(`[Popup] Active tab: ${tab.url}`, 'info');
-
-      const restrictedPrefixes = ['chrome://', 'chrome-extension://', 'about:', 'edge://', 'brave://'];
-      if (restrictedPrefixes.some(p => tab.url?.startsWith(p))) {
-        showError('Cannot access browser internal pages.');
-        return;
-      }
-
-      // 2. (Re-)inject content.js
-      log('[Popup] Injecting content.js…', 'info');
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          files: ['content.js']
-        });
-        log('[Popup] content.js injected.', 'ok');
-      } catch (injectErr) {
-        showError(`Injection failed: ${injectErr.message}`);
-        return;
-      }
-
-      // 3. Send OMNIFLOW_INJECT command
-      log('[Popup] Sending OMNIFLOW_INJECT to content script…', 'info');
-      let result;
-      try {
-        result = await chrome.tabs.sendMessage(tab.id, {
-          type: 'OMNIFLOW_INJECT',
-          text: 'Hello from OmniFlow',
-        });
-      } catch (msgErr) {
-        showError(`Could not reach content script: ${msgErr.message}`);
-        return;
-      }
-
-      if (!result) {
-        showError('Content script returned no data.');
-        return;
-      }
-
-      // 4. Render result
-      if (result.success) {
-        log(`[Popup] Injection SUCCESS. Detected text: "${result.text}"`, 'ok');
-        showInjectResult('success', result.text);
-        setStatus('success');
-      } else {
-        log(`[Popup] Injection FAILED. Reason: ${result.error || 'unknown'}`, 'error');
-        showInjectResult('failed', result.text || '');
-        showError(result.error || 'Injection failed — editor not found or text mismatch.');
-      }
-
-    } catch (err) {
-      showError(`Unexpected error: ${err.message}`);
-    } finally {
-      injectBtn.disabled = false;
-      testBtn.disabled = false;
-      if (generateBtn) generateBtn.disabled = false;
-      if (inspectBtn) inspectBtn.disabled = false;
-    }
-  });
-}
-
-if (generateBtn) {
-  generateBtn.addEventListener('click', async () => {
-    clearError();
-    hideGeneratePanel();
-    hideInjectPanel();
-    hideInspectPanel();
-    hideStatusPanel();
-    if (statusPollIntervalId) {
-      clearInterval(statusPollIntervalId);
-      statusPollIntervalId = null;
-    }
-
-    generateBtn.disabled = true;
-    injectBtn.disabled   = true;
-    testBtn.disabled     = true;
-    if (inspectBtn) inspectBtn.disabled = true;
-    setStatus('running');
-    log('[Popup] Test Generate Click clicked.', 'info');
-
-    try {
-      // 1. Get active tab
-      log('[Popup] Querying active tab…', 'info');
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-      if (!tab) { showError('No active tab found.'); return; }
-
-      log(`[Popup] Active tab: ${tab.url}`, 'info');
-
-      const restrictedPrefixes = ['chrome://', 'chrome-extension://', 'about:', 'edge://', 'brave://'];
-      if (restrictedPrefixes.some(p => tab.url?.startsWith(p))) {
-        showError('Cannot access browser internal pages.');
-        return;
-      }
-
-      // 2. Inject content.js
-      log('[Popup] Injecting content.js…', 'info');
-      try {
-        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
-        log('[Popup] content.js injected.', 'ok');
-      } catch (injectErr) {
-        showError(`Injection failed: ${injectErr.message}`);
-        return;
-      }
-
-      // Send OMNIFLOW_RESET to release any pre-existing lock/status state on the tab
-      try {
-        log('[Popup] Sending OMNIFLOW_RESET to tab…', 'info');
-        await chrome.tabs.sendMessage(tab.id, { type: 'OMNIFLOW_RESET' });
-        log('[Popup] OMNIFLOW_RESET completed.', 'ok');
-      } catch (resetErr) {
-        // Log a warning, but don't abort, since it could be a transient message issue or a clean slate
-        log(`[Popup] OMNIFLOW_RESET warning: ${resetErr.message}`, 'warn');
-      }
-
-      // 3. Send OMNIFLOW_GENERATE
-      log('[Popup] Sending OMNIFLOW_GENERATE to content script…', 'info');
-      let result;
-      try {
-        result = await chrome.tabs.sendMessage(tab.id, { type: 'OMNIFLOW_GENERATE' });
-      } catch (msgErr) {
-        showError(`Could not reach content script: ${msgErr.message}`);
-        return;
-      }
-
-      if (!result) { showError('Content script returned no data.'); return; }
-
-      // 4. Render result
-      log(`[Popup] GENERATE result received. success=${result.success}`, result.success ? 'ok' : 'warn');
-      log(`[Popup] editorFound=${result.editorFound}, promptInjected=${result.promptInjected}`, 'info');
-      log(`[Popup] buttonFound=${result.buttonFound}, buttonClicked=${result.buttonClicked}`, 'info');
-      if (result.clickStrategy || result.strategyUsed) log(`[Popup] Strategy used: ${result.clickStrategy || result.strategyUsed}`, 'ok');
-      if (result.error)        log(`[Popup] Error: ${result.error}`, 'error');
-
-      renderGenerateResult(result);
-      setStatus(result.success ? 'success' : 'error');
-
-      if (!result.success) {
-        showError(result.error || 'Generate automation failed.');
-      } else {
-        // Start status tracking polling
-        startStatusPolling(tab.id);
-      }
-
-    } catch (err) {
-      showError(`Unexpected error: ${err.message}`);
-    } finally {
-      if (!statusPollIntervalId) {
-        generateBtn.disabled = false;
-        injectBtn.disabled   = false;
-        testBtn.disabled     = false;
-        if (inspectBtn) inspectBtn.disabled = false;
-      }
-    }
-  });
-}
-
-// ── Phase 2.2: inspect button click ───────────────────────
-if (inspectBtn) {
-  inspectBtn.addEventListener('click', async () => {
-    clearError();
-    hideInspectPanel();
-    hideInjectPanel();
-    hideGeneratePanel();
-    hideStatusPanel();
-    if (statusPollIntervalId) {
-      clearInterval(statusPollIntervalId);
-      statusPollIntervalId = null;
-    }
-
-    inspectBtn.disabled  = true;
-    generateBtn.disabled = true;
-    injectBtn.disabled   = true;
-    testBtn.disabled     = true;
-    setStatus('running');
-    log('[Popup] Test Inspect Composer clicked.', 'info');
-
-    try {
-      // 1. Get active tab
-      log('[Popup] Querying active tab…', 'info');
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-      if (!tab) { showError('No active tab found.'); return; }
-
-      log(`[Popup] Active tab: ${tab.url}`, 'info');
-
-      const restrictedPrefixes = ['chrome://', 'chrome-extension://', 'about:', 'edge://', 'brave://'];
-      if (restrictedPrefixes.some(p => tab.url?.startsWith(p))) {
-        showError('Cannot access browser internal pages.');
-        return;
-      }
-
-      // 2. Inject content.js
-      log('[Popup] Injecting content.js…', 'info');
-      try {
-        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
-        log('[Popup] content.js injected.', 'ok');
-      } catch (injectErr) {
-        showError(`Injection failed: ${injectErr.message}`);
-        return;
-      }
-
-      // 3. Send OMNIFLOW_INSPECT_COMPOSER
-      log('[Popup] Sending OMNIFLOW_INSPECT_COMPOSER to content script…', 'info');
-      let result;
-      try {
-        result = await chrome.tabs.sendMessage(tab.id, { type: 'OMNIFLOW_INSPECT_COMPOSER' });
-      } catch (msgErr) {
-        showError(`Could not reach content script: ${msgErr.message}`);
-        return;
-      }
-
-      if (!result) { showError('Content script returned no data.'); return; }
-
-      // 4. Render result
-      log(`[Popup] INSPECT result received. success=${result.success}`, result.success ? 'ok' : 'warn');
-      if (result.error) log(`[Popup] Error: ${result.error}`, 'error');
-
-      // Log composer buttons to diagnostic log
-      if (result.success && result.buttons) {
-        log(`[Popup] Composer selected`, 'ok');
-        result.buttons.forEach((btn) => {
-          log(`[Popup] Button #${btn.index} text="${btn.text}"`, 'info');
-        });
-      }
-
-      renderInspectResult(result);
-      setStatus(result.success ? 'success' : 'error');
-
-      if (!result.success) {
-        showError(result.error || 'Composer inspection failed.');
-      }
-
-    } catch (err) {
-      showError(`Unexpected error: ${err.message}`);
-    } finally {
-      inspectBtn.disabled  = false;
-      generateBtn.disabled = false;
-      injectBtn.disabled   = false;
-      testBtn.disabled     = false;
-    }
-  });
-}
-
-// ── Log toggle ────────────────────────────────────────────
-logToggle.addEventListener('click', () => {
-  const isOpen = logBox.classList.toggle('open');
-  toggleArrow.classList.toggle('open', isOpen);
-  logToggle.setAttribute('aria-expanded', String(isOpen));
-  logBox.setAttribute('aria-hidden', String(!isOpen));
-});
-
-// ── Boot log ──────────────────────────────────────────────
-log('[Popup] OmniFlow Phase 3.1 popup loaded.', 'ok');
-updateStatusPanel({ status: 'waiting', elapsedSeconds: 0 });
-
-// ── CLI Sync Mode Orchestrator ──────────────────────────────
-const cliSyncConnectBtn    = document.getElementById('cliSyncConnectBtn');
-const cliConnectionStatus = document.getElementById('cliConnectionStatus');
-const cliProjectInfo      = document.getElementById('cliProjectInfo');
-const cliInfoPrompt       = document.getElementById('cliInfoPrompt');
-const cliInfoClips        = document.getElementById('cliInfoClips');
-const cliStartBtn         = document.getElementById('cliStartBtn');
-const cliClipsListWrap    = document.getElementById('cliClipsListWrap');
-const cliClipsList        = document.getElementById('cliClipsList');
-
-let cliProjectManifest = null;
-let isCliSyncRunning = false;
-
-async function fetchProjectFromCli() {
-  try {
-    const res = await fetch('http://localhost:3001/project');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const project = await res.json();
-    return project;
-  } catch (err) {
-    log(`Failed to fetch project from CLI: ${err.message}`, 'error');
-    return null;
-  }
-}
-
-function renderCliClipsList(clips) {
-  cliClipsList.innerHTML = '';
-  clips.forEach(c => {
-    const li = document.createElement('li');
-    li.className = 'cli-clip-item';
-    
-    let statusClass = 'pending';
-    let statusLabel = 'Pending';
-    if (c.status === 'generating') {
-      statusClass = 'generating';
-      statusLabel = 'Generating';
-    } else if (c.status === 'completed') {
-      statusClass = 'completed';
-      statusLabel = 'Completed';
-    }
-
-    li.innerHTML = `
-      <span class="cli-clip-name">${c.fileName} (Clip #${c.index})</span>
-      <span class="cli-clip-status ${statusClass}">${statusLabel}</span>
-    `;
-    cliClipsList.appendChild(li);
-  });
-}
-
-async function updateCliUI() {
-  const project = await fetchProjectFromCli();
-  if (!project) {
-    cliConnectionStatus.className = 'cli-status-badge badge-disconnected';
-    cliConnectionStatus.textContent = 'Disconnected';
-    cliProjectInfo.style.display = 'none';
-    cliClipsListWrap.style.display = 'none';
-    cliProjectManifest = null;
-    return false;
-  }
-
-  cliProjectManifest = project;
-  cliConnectionStatus.className = 'cli-status-badge badge-connected';
-  cliConnectionStatus.textContent = 'Connected';
-  
-  cliInfoPrompt.textContent = project.prompt;
-  cliInfoClips.textContent = `${project.clips.filter(c => c.status === 'completed').length} / ${project.clips.length}`;
-  cliProjectInfo.style.display = 'flex';
-  
-  renderCliClipsList(project.clips);
-  cliClipsListWrap.style.display = 'flex';
-  return true;
-}
-
-cliSyncConnectBtn.addEventListener('click', async () => {
-  log('[CLI Sync] Connecting to local server...', 'info');
-  const success = await updateCliUI();
-  if (success) {
-    log('[CLI Sync] Successfully connected to OmniFlow CLI server.', 'ok');
+function checkForm() {
+  if (fileInput.files[0] && promptInput.value.trim().length > 0) {
+    startBtn.disabled = false;
   } else {
-    showError('Could not connect to CLI server. Ensure you ran: node cli.js');
+    startBtn.disabled = true;
   }
-});
+}
 
-cliStartBtn.addEventListener('click', async () => {
-  if (isCliSyncRunning) {
-    log('[CLI Sync] Sync loop already running.', 'warn');
-    return;
+function updateStep(stepId, state, subtext) {
+  const el = document.getElementById('step-' + stepId);
+  const sub = document.getElementById('sub-' + stepId);
+  if(state === 'active') {
+    el.classList.add('active');
+    el.classList.remove('completed');
+    if(subtext) sub.textContent = subtext;
+  } else if(state === 'completed') {
+    el.classList.remove('active');
+    el.classList.add('completed');
+    el.querySelector('.step-icon').textContent = '✓';
+    if(subtext) sub.textContent = subtext;
+  } else if(state === 'error') {
+    el.classList.add('active');
+    el.style.color = 'var(--error)';
+    el.querySelector('.step-icon').style.borderColor = 'var(--error)';
+    el.querySelector('.step-icon').textContent = '✗';
+    if(subtext) sub.textContent = subtext;
   }
+}
 
-  if (!cliProjectManifest || !cliProjectManifest.clips || cliProjectManifest.clips.length === 0) {
-    showError('No project connected. Connect to CLI first.');
-    return;
-  }
+function log(msg) {
+  logOutput.style.display = 'block';
+  logOutput.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
+  logOutput.scrollTop = logOutput.scrollHeight;
+}
 
-  isCliSyncRunning = true;
-  cliStartBtn.disabled = true;
-  cliStartBtn.textContent = '⏳ Running Sync...';
-  log('[CLI Sync] Starting automated clip workflow...', 'ok');
+// MAIN PIPELINE TRIGGER
+startBtn.addEventListener('click', async () => {
+  const file = fileInput.files[0];
+  const targetPrompt = promptInput.value.trim();
+  const apiKey = apiKeyInput.value.trim();
 
+  inputPanel.style.display = 'none';
+  trackerPanel.style.display = 'flex';
+  
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab) throw new Error('No active browser tab found.');
+    // --- PHASE 1, 2, 3: Backend Processing Pipeline ---
+    updateStep('ingest', 'active', 'Uploading and splitting video...');
+    log('Uploading source video to backend...');
+    
+    const queryParams = new URLSearchParams({ 
+      name: file.name,
+      prompt: targetPrompt
+    });
+    if(apiKey) queryParams.set('apiKey', apiKey);
 
-    // Loop through clips
-    for (let i = 0; i < cliProjectManifest.clips.length; i++) {
-      // Refresh manifest state from server to get accurate statuses
-      await updateCliUI();
-      const clip = cliProjectManifest.clips[i];
+    const res = await fetch(`${API_BASE}/api/process-full-pipeline?${queryParams.toString()}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: file
+    });
 
-      if (clip.status === 'completed') {
-        log(`[CLI Sync] Clip #${clip.index} is already completed. Skipping.`, 'info');
-        continue;
-      }
-
-      log(`[CLI Sync] Processing Clip #${clip.index}: injecting prompt and generating...`, 'info');
-      
-      // Update state to generating in UI
-      clip.status = 'generating';
-      renderCliClipsList(cliProjectManifest.clips);
-
-      // Send execution command to content script
-      let response;
-      try {
-        response = await chrome.tabs.sendMessage(tab.id, {
-          type: 'OMNIFLOW_SYNC_RUN_CLIP',
-          index: clip.index,
-          prompt: clip.prompt
-        });
-      } catch (err) {
-        throw new Error(`Content script connection failed: ${err.message}. Ensure you are on the Omni editor page.`);
-      }
-
-      if (!response || !response.success) {
-        throw new Error(response?.error || `Failed on Clip #${clip.index}`);
-      }
-
-      log(`[CLI Sync] Clip #${clip.index} completed generation and uploaded successfully.`, 'ok');
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || "Backend pipeline failed");
     }
 
-    log('[CLI Sync] Automated workflow completed successfully! Final merging will take place on the CLI.', 'ok');
-    setStatus('success');
+    updateStep('ingest', 'completed');
+    updateStep('intel', 'completed');
+    updateStep('prompt', 'completed');
+    
+    const data = await res.json();
+    log(`Backend pipeline success! Generated ${data.tasks.length} clip instructions.`);
+
+    // --- PHASE 4: Parallel Video Generation (Frontend Automation) ---
+    updateStep('gen', 'active', `Triggering ${data.tasks.length} Gemini tabs in parallel...`);
+    generatedClipsExpected = data.tasks.length;
+    generatedClipsFound = [];
+    
+    let hasError = false;
+    const chromePort = chromePortInput.value.trim() || '9222';
+    
+    const runningPromises = data.tasks.map((task, index) => {
+      return new Promise((resolve) => {
+        log(`Starting SSE event listener for ${task.clipId}...`);
+        const params = new URLSearchParams({
+          clipId: task.clipId,
+          videoPath: task.videoPath,
+          prompt: task.prompt,
+          chromePort: chromePort
+        });
+        const sse = new EventSource(`${API_BASE}/api/run-stream?${params.toString()}`);
+
+        sse.onmessage = (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            if (payload.type === 'log') {
+              log(`[${task.clipId}] ${payload.data}`);
+            } else if (payload.type === 'error') {
+              log(`[${task.clipId}] ERROR: ${payload.data}`);
+              hasError = true;
+            } else if (payload.type === 'result') {
+              if (payload.data.downloadedPath) {
+                generatedClipsFound.push(payload.data.downloadedPath);
+                log(`Detected completed clip: ${payload.data.downloadedPath.split('/').pop() || payload.data.downloadedPath.split('\\\\').pop()}`);
+                updateStep('gen', 'active', `Generated ${generatedClipsFound.length} of ${generatedClipsExpected} clips...`);
+              }
+            }
+          } catch (err) {
+            log('Error parsing event data: ' + err.message);
+          }
+        };
+
+        sse.onerror = () => {
+          sse.close();
+          resolve();
+        };
+      });
+    });
+
+    await Promise.all(runningPromises);
+
+    if (hasError && generatedClipsFound.length < generatedClipsExpected) {
+       throw new Error("Some clips failed to generate properly. Please check logs.");
+    }
+
+    updateStep('gen', 'completed', 'All clips generated successfully.');
+    // Trigger Merge Phase
+    triggerMergePhase(generatedClipsFound.sort());
+
   } catch (err) {
-    showError(`Sync execution failed: ${err.message}`);
-    log(`[CLI Sync] Error: ${err.message}`, 'error');
-  } finally {
-    isCliSyncRunning = false;
-    cliStartBtn.disabled = false;
-    cliStartBtn.textContent = '🚀 Start Sync Automation';
-    await updateCliUI();
+    log('Error: ' + err.message);
+    updateStep('ingest', 'error', err.message);
   }
 });
 
+// --- PHASE 5: Post-Processing & Merge ---
+async function triggerMergePhase(clipPaths) {
+  updateStep('merge', 'active', 'Sending generated clips to FFmpeg merger...');
+  log('Calling /api/run-merge...');
+
+  try {
+    const mergeRes = await fetch(`${API_BASE}/api/run-merge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inputPaths: clipPaths })
+    });
+    
+    if (!mergeRes.ok) {
+      const errData = await mergeRes.json();
+      throw new Error(errData.error || "Merging failed.");
+    }
+    
+    const mergeData = await mergeRes.json();
+    
+    updateStep('merge', 'completed', 'Merger complete!');
+    log('Final video stitched successfully!');
+
+    // --- RESULT DISPLAY ---
+    const videoFilename = mergeData.finalPath.split('/').pop() || mergeData.finalPath.split('\\\\').pop();
+    const videoUrl = `${API_BASE}/merged-output/${encodeURIComponent(videoFilename)}`;
+    
+    document.getElementById('finalVideo').src = videoUrl;
+    document.getElementById('downloadLink').href = videoUrl;
+    
+    resultPanel.style.display = 'block';
+
+  } catch (err) {
+    log('Error during merge: ' + err.message);
+    updateStep('merge', 'error', err.message);
+  }
+}
+});

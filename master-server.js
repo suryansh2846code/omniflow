@@ -668,6 +668,16 @@ const server = http.createServer(async (req, res) => {
   const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = parsedUrl.pathname;
 
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type'
+    });
+    res.end();
+    return;
+  }
+
   // Serves HTML UI
   if (req.method === 'GET' && pathname === '/') {
     res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -745,8 +755,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Backend Pipeline API
   if (req.method === 'POST' && pathname === '/api/process-full-pipeline') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
     const filename = parsedUrl.searchParams.get('name') || 'master_input.mp4';
     const targetPrompt = parsedUrl.searchParams.get('prompt') || '';
     const apiKey = parsedUrl.searchParams.get('apiKey');
@@ -769,12 +782,19 @@ const server = http.createServer(async (req, res) => {
         const splitManifest = procEngine.process(tempInputPath, outputClipsDir, { segmentLength: 10 });
         const clipPaths = splitManifest.clips.map(c => c.filePath);
 
+        console.log(`\n================================`);
         console.log(`[Master] 2. Analyzing with Video Intelligence...`);
-        const intelLayer = new VideoIntelligenceLayer({ apiKey: apiKey || undefined });
-        const intelResult = await intelLayer.processClips(clipPaths, targetPrompt);
+        const intelLayer = new VideoIntelligenceLayer({ 
+          apiKey,
+          modelName: process.env.VISION_MODEL || 'gemini-1.5-flash'
+        });
+        const intelResult = await intelLayer.processClips(clipPaths, targetPrompt, { tempDir });
 
         console.log(`[Master] 3. Generating Layered Prompts...`);
-        const promptEngine = new PromptIntelligenceEngine({ apiKey: apiKey || undefined });
+        const promptEngine = new PromptIntelligenceEngine({ 
+          apiKey: apiKey || undefined,
+          modelName: process.env.PROMPT_ENGINE_MODEL || 'gemini-1.5-flash'
+        });
         const promptOutput = await promptEngine.process(intelResult.promptEngineInput);
 
         // Prepare tasks for frontend to dispatch to Gemini
@@ -838,6 +858,10 @@ const server = http.createServer(async (req, res) => {
 
   // Merge endpoint
   if (req.method === 'POST' && pathname === '/api/run-merge') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
     let body = '';
     req.on('data', chunk => body += chunk.toString());
     req.on('end', async () => {

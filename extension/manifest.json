@@ -5,8 +5,11 @@
   "description": "Phase 4 — End-to-End Generate Validation.",
 
   "action": {
-    "default_popup": "popup.html",
     "default_title": "OmniFlow"
+  },
+
+  "background": {
+    "service_worker": "background.js"
   },
 
   "permissions": [

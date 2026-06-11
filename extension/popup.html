@@ -1,211 +1,102 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OmniFlow</title>
-  <link rel="stylesheet" href="popup.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OmniFlow — Master Pipeline</title>
+  <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-
-  <!-- ── Header ─────────────────────────────────────────── -->
-  <header class="header">
-    <div class="logo">
-      <div class="logo-icon">⚡</div>
-      <div class="logo-text">
-        <h1 class="title">OmniFlow</h1>
-        <span class="subtitle">Phase 2 · Generate Automation</span>
+  <header>
+    <div class="brand">
+      <div class="brand-icon">♾️</div>
+      <div class="brand-text">
+        <h1>OmniFlow Master</h1>
+        <p>End-to-End Orchestration</p>
       </div>
     </div>
-    <div class="status-dot" id="statusDot" title="Idle"></div>
   </header>
 
-  <!-- ── Action Buttons ─────────────────────────────────── -->
-  <section class="action-section">
-    <button id="testBtn" class="btn-primary">
-      <span class="btn-icon">🔍</span>
-      <span class="btn-label">Test Omni</span>
-    </button>
-    <button id="injectBtn" class="btn-secondary">
-      <span class="btn-icon">💉</span>
-      <span class="btn-label">Test Prompt Injection</span>
-    </button>
-    <button id="generateBtn" class="btn-generate">
-      <span class="btn-icon">🚀</span>
-      <span class="btn-label">Test Generate Click</span>
-    </button>
-    <button id="inspectBtn" class="btn-inspect">
-      <span class="btn-icon">🔬</span>
-      <span class="btn-label">Inspect Composer</span>
-    </button>
-  </section>
+  <main>
+    <section class="panel" id="inputPanel">
+      <div class="panel-title">🎬 1. Setup Your Vision</div>
+      
+      <div class="file-input-wrapper">
+        <div class="file-icon">📼</div>
+        <span class="file-label-text" id="fileLabel">Drag & drop source video</span>
+        <input type="file" id="videoFile" accept="video/mp4,video/quicktime">
+      </div>
 
-  <!-- ── Results Panel ──────────────────────────────────── -->
-  <section class="results-section" id="resultsSection" aria-live="polite">
-
-    <!-- Summary cards -->
-    <div class="cards" id="summaryCards">
-      <div class="card" id="cardUrl">
-        <span class="card-label">URL</span>
-        <span class="card-value" id="valUrl">—</span>
-      </div>
-      <div class="card" id="cardTitle">
-        <span class="card-label">Page</span>
-        <span class="card-value" id="valTitle">—</span>
-      </div>
-      <div class="card" id="cardCount">
-        <span class="card-label">Prompt Candidates</span>
-        <span class="card-value" id="valCount">—</span>
-      </div>
-    </div>
-
-    <!-- Injection result panel -->
-    <div class="inject-panel" id="injectPanel" aria-live="polite">
-      <div class="inject-status-row">
-        <span class="inject-label">Injection Status</span>
-        <span class="inject-badge" id="injectBadge"></span>
-      </div>
-      <div class="inject-text-row" id="injectTextRow">
-        <span class="inject-text-label">Detected Text</span>
-        <span class="inject-text-value" id="injectTextValue"></span>
-      </div>
-    </div>
-
-    <!-- Generation result panel -->
-    <div class="generate-panel" id="generatePanel" aria-live="polite">
-      <div class="gen-panel-header">
-        <span class="gen-panel-title">Generation Test</span>
-      </div>
-      <div class="gen-rows" id="genRows">
-        <div class="gen-row">
-          <span class="gen-row-label">Editor Found</span>
-          <span class="gen-row-val" id="genEditorFound">—</span>
-        </div>
-        <div class="gen-row">
-          <span class="gen-row-label">Prompt Injected</span>
-          <span class="gen-row-val" id="genPromptInjected">—</span>
-        </div>
-        <div class="gen-row">
-          <span class="gen-row-label">Button Found</span>
-          <span class="gen-row-val" id="genButtonFound">—</span>
-        </div>
-        <div class="gen-row">
-          <span class="gen-row-label">Button Clicked</span>
-          <span class="gen-row-val" id="genButtonClicked">—</span>
-        </div>
-        <div class="gen-row">
-          <span class="gen-row-label">Prompt Accepted</span>
-          <span class="gen-row-val" id="genPromptAccepted">—</span>
-        </div>
-        <div class="gen-row">
-          <span class="gen-row-label">Generation Started</span>
-          <span class="gen-row-val" id="genGenerationStarted">—</span>
-        </div>
-        <div class="gen-row">
-          <span class="gen-row-label">Generation Completed</span>
-          <span class="gen-row-val" id="genGenerationCompleted">—</span>
-        </div>
-        <div class="gen-row gen-row-strategy" id="genStrategyRow">
-          <span class="gen-row-label">Strategy Used</span>
-          <span class="gen-row-val" id="genStrategy">—</span>
-        </div>
-        <div class="gen-row" id="genButtonTextRow">
-          <span class="gen-row-label">Button Text</span>
-          <span class="gen-row-val" id="genButtonText">—</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Generation Status Panel -->
-    <div class="status-panel" id="generationStatusPanel" aria-live="polite">
-      <div class="status-panel-header">
-        <span class="status-panel-title">Generation Status</span>
-      </div>
-      <div class="status-content">
-        <div class="status-state-row">
-          <span class="status-state-label">Current State</span>
-          <span class="status-state-badge badge-waiting" id="statusStateBadge">Waiting</span>
-        </div>
-        <div class="status-timer-row">
-          <span class="status-timer-label">Elapsed Time</span>
-          <span class="status-timer-val" id="statusTimerVal">0s</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Composer Inspector panel -->
-    <div class="inspect-panel" id="composerInspectPanel" aria-live="polite">
-      <div class="inspect-panel-header">
-        <span class="inspect-panel-title">Composer Inspector</span>
-      </div>
-      <div class="inspect-rows">
-        <div class="inspect-row">
-          <span class="inspect-row-label">Composer Found</span>
-          <span class="inspect-row-val" id="inspectComposerFound">—</span>
-        </div>
-        <div class="inspect-row">
-          <span class="inspect-row-label">Buttons Found</span>
-          <span class="inspect-row-val" id="inspectButtonsFound">—</span>
-        </div>
-      </div>
-      <div class="inspect-buttons-wrap" id="inspectButtonsWrap">
-        <span class="inspect-list-label">Buttons List:</span>
-        <ul class="inspect-buttons-list" id="inspectButtonsList"></ul>
-      </div>
-    </div>
-
-    <!-- CLI Sync Panel -->
-    <div class="cli-sync-panel" id="cliSyncPanel" aria-live="polite">
-      <div class="cli-panel-header">
-        <span class="cli-panel-title">CLI Sync Mode</span>
-        <button id="cliSyncConnectBtn" class="btn-cli-connect">Connect to CLI</button>
+      <div class="form-group" style="margin-top: 10px;">
+        <label>AI Editing Target Prompt</label>
+        <textarea id="promptInput" rows="3" placeholder="e.g. Turn this vlog into a high-octane cyberpunk action movie..."></textarea>
       </div>
       
-      <div class="cli-status-row">
-        <span class="cli-status-label">CLI Status</span>
-        <span id="cliConnectionStatus" class="cli-status-badge badge-disconnected">Disconnected</span>
+      <div class="form-group">
+        <label>Gemini API Key (Optional)</label>
+        <input type="password" id="apiKeyInput" placeholder="Leave blank to use local .env key">
       </div>
 
-      <div class="cli-project-info" id="cliProjectInfo" style="display: none;">
-        <div class="cli-info-row">
-          <span class="cli-info-label">Prompt</span>
-          <span class="cli-info-val" id="cliInfoPrompt">—</span>
+      <div class="form-group" style="margin-bottom: 8px;">
+        <label>Chrome Debug Port</label>
+        <input type="number" id="chromePortInput" value="9222" placeholder="e.g. 9222">
+      </div>
+
+      <button id="startBtn" class="btn-process" disabled>🚀 Run Full OmniFlow Pipeline</button>
+    </section>
+
+    <section class="panel tracker" id="trackerPanel">
+      <div class="panel-title">⚡ 2. Pipeline Execution</div>
+      
+      <div class="step" id="step-ingest">
+        <div class="step-icon">1</div>
+        <div>
+          <div class="step-text">Video Ingestion & Splitting</div>
+          <div class="step-subtext" id="sub-ingest">Waiting to start...</div>
         </div>
-        <div class="cli-info-row">
-          <span class="cli-info-label">Segments</span>
-          <span class="cli-info-val" id="cliInfoClips">—</span>
+      </div>
+
+      <div class="step" id="step-intel">
+        <div class="step-icon">2</div>
+        <div>
+          <div class="step-text">Video Intelligence & Context Analysis</div>
+          <div class="step-subtext" id="sub-intel">Analyzing character sheets & environment...</div>
         </div>
-        <button id="cliStartBtn" class="btn-cli-start">🚀 Start Sync Automation</button>
       </div>
 
-      <div class="cli-clips-list-wrap" id="cliClipsListWrap" style="display: none;">
-        <span class="cli-list-label">Workflow Checklist:</span>
-        <ul class="cli-clips-list" id="cliClipsList"></ul>
+      <div class="step" id="step-prompt">
+        <div class="step-icon">3</div>
+        <div>
+          <div class="step-text">Prompt Engineering Engine</div>
+          <div class="step-subtext" id="sub-prompt">Generating layered clip instructions...</div>
+        </div>
       </div>
-    </div>
 
-    <!-- Candidate list -->
-    <div class="candidates-wrap" id="candidatesWrap">
-      <h2 class="section-heading" id="candidatesHeading">Candidates</h2>
-      <ul class="candidates-list" id="candidatesList" aria-label="Prompt field candidates"></ul>
-    </div>
+      <div class="step" id="step-gen">
+        <div class="step-icon">4</div>
+        <div>
+          <div class="step-text">Parallel Video Generation</div>
+          <div class="step-subtext" id="sub-gen">Waiting for Gemini extension tabs...</div>
+        </div>
+      </div>
 
-    <!-- Error banner -->
-    <div class="error-banner" id="errorBanner" role="alert" aria-hidden="true">
-      <span class="error-icon">⚠️</span>
-      <span id="errorMsg"></span>
-    </div>
+      <div class="step" id="step-merge">
+        <div class="step-icon">5</div>
+        <div>
+          <div class="step-text">Post-Processing & Composition</div>
+          <div class="step-subtext" id="sub-merge">Stitching final video...</div>
+        </div>
+      </div>
+      
+      <div id="logOutput"></div>
+    </section>
 
-  </section>
-
-  <!-- ── Diagnostic Log ─────────────────────────────────── -->
-  <section class="log-section">
-    <button class="log-toggle" id="logToggle" aria-expanded="false" aria-controls="logBox">
-      <span>Diagnostic Log</span>
-      <span class="toggle-arrow" id="toggleArrow">▶</span>
-    </button>
-    <div class="log-box" id="logBox" aria-hidden="true"></div>
-  </section>
+    <section class="panel" id="resultPanel">
+      <div class="panel-title">✨ 3. Final Masterpiece</div>
+      <video id="finalVideo" controls playsinline></video>
+      <a id="downloadLink" class="result-link" href="#" download="omniflow_masterpiece.mp4">⬇️ Download Masterpiece</a>
+    </section>
+  </main>
 
   <script src="popup.js"></script>
 </body>
