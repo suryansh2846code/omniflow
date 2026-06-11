@@ -32,6 +32,8 @@ export class UploadManager {
     
     try {
       await this._triggerAndInject(absolutePath);
+      // Wait a short moment to let Chrome complete the file chooser closing transition
+      await new Promise(r => setTimeout(r, 1500));
     } finally {
       releaseLock();
     }
@@ -151,9 +153,9 @@ export class UploadManager {
 
     console.log(`[UploadManager] Injecting file: ${absolutePath}`);
 
-    // 5. Submit file
-    await this.client.send('DOM.setFileInputFiles', {
-      backendNodeId: fileChooserBackendNodeId,
+    // 5. Submit file using the official Page.handleFileChooser API
+    await this.client.send('Page.handleFileChooser', {
+      action: 'accept',
       files: [absolutePath]
     });
     

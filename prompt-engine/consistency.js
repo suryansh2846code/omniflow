@@ -67,23 +67,47 @@ export class ConsistencyEngine {
       const normalizedClipGoal = this.normalizeClause(clipGoalStr);
       const normalizedTechnicalPrompt = this.normalizeClause(technicalPromptStr);
 
-      // Stitch all 8 layers programmatically
-      const finalAssembledPrompt = [
-        normalizedMasterContext,
-        normalizedCharSheet,
-        normalizedVisualDNA,
-        normalizedEditorDNA,
-        normalizedStoryPlan,
-        normalizedShotPlan,
-        normalizedClipGoal,
-        normalizedTechnicalPrompt
-      ].join(' ');
+      // Stitch a simplified, high-quality cinematic prompt.
+      // If the LLM has generated prompt layers, we concatenate them to preserve their prose quality.
+      // Otherwise, we build a natural paragraph without rigid technical rules or editor directives.
+      let finalAssembledPrompt = "";
+      if (master && action && technical) {
+        finalAssembledPrompt = [
+          this.normalizeClause(master),
+          this.normalizeClause(action),
+          this.normalizeClause(technical)
+        ].join(' ');
+      } else {
+        const visualGenre = masterContext.visualGenre || 'Cinematic';
+        const environment = masterContext.overallEnvironment || '';
+        
+        const characterDesc = [
+          characterSheet.identity,
+          characterSheet.face,
+          characterSheet.clothing,
+          characterSheet.accessories
+        ].filter(Boolean).map(p => this.normalizeClause(p)).join(' ');
+
+        const actionText = action || clip.relationship.currentClipGoal || '';
+        const cameraDetails = `${shot.shotType || ''} (${shot.framing || ''}). ${shot.cameraMovement || ''}.`.trim();
+        const styleText = `${visualDNA.colorPalette || ''}. ${visualDNA.lighting || ''}. ${technical || ''}`.trim();
+
+        const assembledParts = [
+          `A ${visualGenre} scene set in ${environment}.`,
+          characterDesc,
+          actionText,
+          cameraDetails,
+          styleText
+        ].filter(Boolean);
+
+        finalAssembledPrompt = assembledParts.map(p => this.normalizeClause(p)).join(' ');
+      }
 
       // Also ensure threeLayerPrompt values are set/updated
       clip.threeLayerPrompt = {
-        master: `${normalizedMasterContext} ${normalizedCharSheet} ${normalizedVisualDNA}`.trim(),
-        clip: `${normalizedStoryPlan} ${normalizedShotPlan} ${normalizedClipGoal}`.trim(),
-        technical: normalizedTechnicalPrompt
+        master: master ? this.normalizeClause(master) : `${normalizedMasterContext} ${normalizedCharSheet} ${normalizedVisualDNA}`.trim(),
+        clip: action ? this.normalizeClause(action) : `${normalizedStoryPlan} ${normalizedShotPlan} ${normalizedClipGoal}`.trim(),
+        technical: technical ? this.normalizeClause(technical) : normalizedTechnicalPrompt
       };
 
       return {

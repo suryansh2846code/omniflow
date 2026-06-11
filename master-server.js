@@ -701,7 +701,10 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && pathname === '/api/run-stream') {
-    const videoPath = parsedUrl.searchParams.get('videoPath');
+    let videoPath = parsedUrl.searchParams.get('videoPath');
+    if (videoPath === 'null' || videoPath === 'undefined') {
+      videoPath = null;
+    }
     const prompt = parsedUrl.searchParams.get('prompt');
     const clipId = parsedUrl.searchParams.get('clipId') || 'clip_1';
     const chromePort = parseInt(parsedUrl.searchParams.get('chromePort') || '9222', 10);
@@ -766,16 +769,18 @@ const server = http.createServer(async (req, res) => {
 
     const tempInputPath = path.join(tempDir, `input_${Date.now()}_${filename}`);
     const fileStream = fs.createWriteStream(tempInputPath);
-    req.pipe(fileStream);
-
-    fileStream.on('error', (err) => {
-      console.error("[Master] Upload error:", err.message);
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
+    
+    const uploadFinished = new Promise((resolve, reject) => {
+      fileStream.on('finish', () => resolve());
+      fileStream.on('error', (err) => reject(err));
+      req.on('error', (err) => reject(err));
     });
+
+    req.pipe(fileStream);
 
     req.on('end', async () => {
       try {
+        await uploadFinished;
         console.log(`\n================================`);
         console.log(`[Master] 1. Splitting Video...`);
         const procEngine = new VideoProcessingEngine();
@@ -795,14 +800,50 @@ const server = http.createServer(async (req, res) => {
           apiKey: apiKey || undefined,
           modelName: process.env.PROMPT_ENGINE_MODEL || 'gemini-1.5-flash'
         });
-        const promptOutput = await promptEngine.process(intelResult.promptEngineInput);
 
-        // Prepare tasks for frontend to dispatch to Gemini
-        const tasks = splitManifest.clips.map((clip, index) => {
+        // Helper to parse duration extension from target prompt
+        const parseDurationExtension = (p) => {
+          if (!p) return 0;
+          const regex = /(?:add|extend(?:\s+by)?|extra|duration\s+extension\s+of)\s*(\d+)\s*(?:sec|second|seconds|s\b)/i;
+          const match = p.match(regex);
+          return match ? parseInt(match[1], 10) : 0;
+        };
+
+        const promptEngineInput = intelResult.promptEngineInput;
+        const extraSeconds = parseDurationExtension(targetPrompt);
+        
+        if (extraSeconds > 0) {
+          console.log(`[Master] Duration extension detected. Appending ${extraSeconds} seconds of text-to-video.`);
+          const extraClipsCount = Math.ceil(extraSeconds / 10);
+          let lastEnd = promptEngineInput.videoMetadata.duration;
+          const segmentLength = 10;
+
+          for (let i = 0; i < extraClipsCount; i++) {
+            const newIndex = promptEngineInput.videoMetadata.clips.length;
+            const start = lastEnd;
+            const end = Number((start + segmentLength).toFixed(2));
+            lastEnd = end;
+
+            promptEngineInput.videoMetadata.clips.push({
+              clipIndex: newIndex,
+              timestamps: { start, end },
+              originalDescription: `Continuous extension clip ${newIndex + 1}. Pure creative text-to-video clip based on: ${targetPrompt}. Keep overall character visual sheet, lighting, and environment identical to prior clips.`,
+              cameraShotType: "cinematic",
+              speakerText: ""
+            });
+          }
+          promptEngineInput.videoMetadata.duration = lastEnd;
+        }
+
+        const promptOutput = await promptEngine.process(promptEngineInput);
+
+        // Prepare tasks for frontend to dispatch to Gemini (including phantom clips)
+        const tasks = promptEngineInput.videoMetadata.clips.map((clip, index) => {
           const promptData = promptOutput.clipPrompts.find(p => p.clipIndex === index);
+          const isPhantom = index >= splitManifest.clips.length;
           return {
-            clipId: clip.clipId,
-            videoPath: clip.filePath,
+            clipId: `clip_${index + 1}`,
+            videoPath: isPhantom ? null : splitManifest.clips[index].filePath,
             prompt: promptData ? promptData.finalAssembledPrompt : targetPrompt
           };
         });

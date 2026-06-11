@@ -74,32 +74,28 @@ You MUST follow these rules to maintain visual and narrative consistency:
 
 2. Character Sheet Generator:
    - Identify the main character(s) in the clips.
-   - Write a detailed visual identity, clothing (colors, materials, items), face features (hair, eyes, skin, features), accessories, and body type.
+   - Describe a clear, distinct visual identity (clothing, face, accessories, body type) that can be easily described in words.
 
 3. Visual DNA Generator:
    - Define the visual "DNA" of the styled output: color palette, lighting style, camera language, and editing style.
 
 4. Editor DNA Engine:
-   - Provide editing guidelines mapping to professional standards: continuityRules, compositionRules, colorRules, storytellingRules, pacingRules, transitionRules.
+   - Provide editing guidelines mapping to professional standards.
 
 5. Story Planner:
-   - Design a structural narrative arc for the video:
-     - hook: Structural plan for early clips.
-     - build: Development plan for mid clips.
-     - payoff: Climax plan for final clips.
-     - clipRoles: Map every clipIndex to a specific role: "Hook", "Build", or "Payoff".
+   - Design a structural narrative arc (hook, build, payoff) for the clips, including mapping each clip to a narrative role.
 
 6. Cut Planner:
-   - Recommend logical cut timestamps (in seconds) to improve visual pacing. Provide a cut timestamp, reason, and confidence score (0 to 1).
+   - Recommend logical cut timestamps (in seconds) to improve visual pacing.
 
 7. Clip-Specific Planners (For each clip):
    - relationship: previousClipSummary, currentClipGoal, nextClipTransition.
    - shotPlanner: Define visual staging (shotType, framing, cameraMovement, focalStyle, purpose).
-   - transitionPlanner: Define entry/exit transitions (transitionIn, transitionOut, reason).
-   - threeLayerPrompt: Create structured master, clip, and technical prompt layers.
-     - master: Setting and character description.
-     - clip: Narrative action goal of this clip.
-     - technical: Technical rendering commands, lighting styles, camera lens properties.
+   - transitionPlanner: Define entry/exit transitions.
+   - threeLayerPrompt: Create high-quality, elegant, and natural cinematic prompt layers. Avoid robotic prefix headers or metadata codes.
+     - master: Natural prose describing the setting and character in detail (e.g. "A retro-futuristic synthwave city street at dusk, neon signs reflecting off wet pavement. A young woman with a leather jacket and neon visor looks around.").
+     - clip: Clean, fluid, and natural description of the specific action goal of the character in this clip (e.g. "She accesses a pocket hologram device, illuminating her face as she walks dynamically through the crowds.").
+     - technical: Direct visual rendering, color, lighting, and camera lens instructions (e.g. "volumetric lighting, cool magenta and blue highlights, cinematic depth of field, captured on a 24mm camera lens with slow panning motion").
 
 You MUST respond strictly in valid JSON matching the schema provided. No markdown wrapping unless requested.`;
 

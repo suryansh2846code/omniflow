@@ -46,9 +46,13 @@ export class JobManager {
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       // 2. Upload video
-      const uploadManager = new UploadManager(client, this.options);
-      await uploadManager.upload(videoPath);
-      status.uploaded = true;
+      if (videoPath) {
+        const uploadManager = new UploadManager(client, this.options);
+        await uploadManager.upload(videoPath);
+        status.uploaded = true;
+      } else {
+        console.log(`[JobManager] Bypassing upload step for text-to-video clip: ${clipId}`);
+      }
 
       // 3. Inject prompt
       const promptInjector = new PromptInjector(client);

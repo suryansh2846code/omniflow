@@ -114,20 +114,36 @@ For the sceneTimeline array:
       }
     };
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestBody)
-    });
+    const makeRequest = async (model) => {
+      const requestUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+      const response = await fetch(requestUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+      });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Gemini API request failed with status ${response.status}: ${errorText}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Gemini API request failed with status ${response.status}: ${errorText}`);
+      }
+
+      return response.json();
+    };
+
+    let data;
+    try {
+      console.log(`[GeminiVisionService] Sending analyzeVideoFrames request with model: ${this.modelName}`);
+      data = await makeRequest(this.modelName);
+    } catch (err) {
+      if (this.modelName === 'gemini-2.5-flash') {
+        console.warn(`[GeminiVisionService] ${this.modelName} analyzeVideoFrames request failed: ${err.message}. Retrying with gemini-1.5-flash fallback...`);
+        data = await makeRequest('gemini-1.5-flash');
+      } else {
+        throw err;
+      }
     }
-
-    const data = await response.json();
 
     try {
       const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -266,20 +282,36 @@ For the sceneTimeline array:
       }
     };
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestBody)
-    });
+    const makeRequest = async (model) => {
+      const requestUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`;
+      const response = await fetch(requestUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+      });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Gemini API request failed with status ${response.status}: ${errorText}`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Gemini API request failed with status ${response.status}: ${errorText}`);
+      }
+
+      return response.json();
+    };
+
+    let data;
+    try {
+      console.log(`[GeminiVisionService] Sending analyzeClips request with model: ${this.modelName}`);
+      data = await makeRequest(this.modelName);
+    } catch (err) {
+      if (this.modelName === 'gemini-2.5-flash') {
+        console.warn(`[GeminiVisionService] ${this.modelName} analyzeClips request failed: ${err.message}. Retrying with gemini-1.5-flash fallback...`);
+        data = await makeRequest('gemini-1.5-flash');
+      } else {
+        throw err;
+      }
     }
-
-    const data = await response.json();
 
     try {
       const candidateText = data.candidates?.[0]?.content?.parts?.[0]?.text;
