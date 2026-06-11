@@ -154,6 +154,36 @@
       </div>
     </div>
 
+    <!-- CLI Sync Panel -->
+    <div class="cli-sync-panel" id="cliSyncPanel" aria-live="polite">
+      <div class="cli-panel-header">
+        <span class="cli-panel-title">CLI Sync Mode</span>
+        <button id="cliSyncConnectBtn" class="btn-cli-connect">Connect to CLI</button>
+      </div>
+      
+      <div class="cli-status-row">
+        <span class="cli-status-label">CLI Status</span>
+        <span id="cliConnectionStatus" class="cli-status-badge badge-disconnected">Disconnected</span>
+      </div>
+
+      <div class="cli-project-info" id="cliProjectInfo" style="display: none;">
+        <div class="cli-info-row">
+          <span class="cli-info-label">Prompt</span>
+          <span class="cli-info-val" id="cliInfoPrompt">—</span>
+        </div>
+        <div class="cli-info-row">
+          <span class="cli-info-label">Segments</span>
+          <span class="cli-info-val" id="cliInfoClips">—</span>
+        </div>
+        <button id="cliStartBtn" class="btn-cli-start">🚀 Start Sync Automation</button>
+      </div>
+
+      <div class="cli-clips-list-wrap" id="cliClipsListWrap" style="display: none;">
+        <span class="cli-list-label">Workflow Checklist:</span>
+        <ul class="cli-clips-list" id="cliClipsList"></ul>
+      </div>
+    </div>
+
     <!-- Candidate list -->
     <div class="candidates-wrap" id="candidatesWrap">
       <h2 class="section-heading" id="candidatesHeading">Candidates</h2>

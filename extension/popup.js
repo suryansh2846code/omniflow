@@ -843,3 +843,156 @@ logToggle.addEventListener('click', () => {
 // ── Boot log ──────────────────────────────────────────────
 log('[Popup] OmniFlow Phase 3.1 popup loaded.', 'ok');
 updateStatusPanel({ status: 'waiting', elapsedSeconds: 0 });
+
+// ── CLI Sync Mode Orchestrator ──────────────────────────────
+const cliSyncConnectBtn    = document.getElementById('cliSyncConnectBtn');
+const cliConnectionStatus = document.getElementById('cliConnectionStatus');
+const cliProjectInfo      = document.getElementById('cliProjectInfo');
+const cliInfoPrompt       = document.getElementById('cliInfoPrompt');
+const cliInfoClips        = document.getElementById('cliInfoClips');
+const cliStartBtn         = document.getElementById('cliStartBtn');
+const cliClipsListWrap    = document.getElementById('cliClipsListWrap');
+const cliClipsList        = document.getElementById('cliClipsList');
+
+let cliProjectManifest = null;
+let isCliSyncRunning = false;
+
+async function fetchProjectFromCli() {
+  try {
+    const res = await fetch('http://localhost:3001/project');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const project = await res.json();
+    return project;
+  } catch (err) {
+    log(`Failed to fetch project from CLI: ${err.message}`, 'error');
+    return null;
+  }
+}
+
+function renderCliClipsList(clips) {
+  cliClipsList.innerHTML = '';
+  clips.forEach(c => {
+    const li = document.createElement('li');
+    li.className = 'cli-clip-item';
+    
+    let statusClass = 'pending';
+    let statusLabel = 'Pending';
+    if (c.status === 'generating') {
+      statusClass = 'generating';
+      statusLabel = 'Generating';
+    } else if (c.status === 'completed') {
+      statusClass = 'completed';
+      statusLabel = 'Completed';
+    }
+
+    li.innerHTML = `
+      <span class="cli-clip-name">${c.fileName} (Clip #${c.index})</span>
+      <span class="cli-clip-status ${statusClass}">${statusLabel}</span>
+    `;
+    cliClipsList.appendChild(li);
+  });
+}
+
+async function updateCliUI() {
+  const project = await fetchProjectFromCli();
+  if (!project) {
+    cliConnectionStatus.className = 'cli-status-badge badge-disconnected';
+    cliConnectionStatus.textContent = 'Disconnected';
+    cliProjectInfo.style.display = 'none';
+    cliClipsListWrap.style.display = 'none';
+    cliProjectManifest = null;
+    return false;
+  }
+
+  cliProjectManifest = project;
+  cliConnectionStatus.className = 'cli-status-badge badge-connected';
+  cliConnectionStatus.textContent = 'Connected';
+  
+  cliInfoPrompt.textContent = project.prompt;
+  cliInfoClips.textContent = `${project.clips.filter(c => c.status === 'completed').length} / ${project.clips.length}`;
+  cliProjectInfo.style.display = 'flex';
+  
+  renderCliClipsList(project.clips);
+  cliClipsListWrap.style.display = 'flex';
+  return true;
+}
+
+cliSyncConnectBtn.addEventListener('click', async () => {
+  log('[CLI Sync] Connecting to local server...', 'info');
+  const success = await updateCliUI();
+  if (success) {
+    log('[CLI Sync] Successfully connected to OmniFlow CLI server.', 'ok');
+  } else {
+    showError('Could not connect to CLI server. Ensure you ran: node cli.js');
+  }
+});
+
+cliStartBtn.addEventListener('click', async () => {
+  if (isCliSyncRunning) {
+    log('[CLI Sync] Sync loop already running.', 'warn');
+    return;
+  }
+
+  if (!cliProjectManifest || !cliProjectManifest.clips || cliProjectManifest.clips.length === 0) {
+    showError('No project connected. Connect to CLI first.');
+    return;
+  }
+
+  isCliSyncRunning = true;
+  cliStartBtn.disabled = true;
+  cliStartBtn.textContent = '⏳ Running Sync...';
+  log('[CLI Sync] Starting automated clip workflow...', 'ok');
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab) throw new Error('No active browser tab found.');
+
+    // Loop through clips
+    for (let i = 0; i < cliProjectManifest.clips.length; i++) {
+      // Refresh manifest state from server to get accurate statuses
+      await updateCliUI();
+      const clip = cliProjectManifest.clips[i];
+
+      if (clip.status === 'completed') {
+        log(`[CLI Sync] Clip #${clip.index} is already completed. Skipping.`, 'info');
+        continue;
+      }
+
+      log(`[CLI Sync] Processing Clip #${clip.index}: injecting prompt and generating...`, 'info');
+      
+      // Update state to generating in UI
+      clip.status = 'generating';
+      renderCliClipsList(cliProjectManifest.clips);
+
+      // Send execution command to content script
+      let response;
+      try {
+        response = await chrome.tabs.sendMessage(tab.id, {
+          type: 'OMNIFLOW_SYNC_RUN_CLIP',
+          index: clip.index,
+          prompt: clip.prompt
+        });
+      } catch (err) {
+        throw new Error(`Content script connection failed: ${err.message}. Ensure you are on the Omni editor page.`);
+      }
+
+      if (!response || !response.success) {
+        throw new Error(response?.error || `Failed on Clip #${clip.index}`);
+      }
+
+      log(`[CLI Sync] Clip #${clip.index} completed generation and uploaded successfully.`, 'ok');
+    }
+
+    log('[CLI Sync] Automated workflow completed successfully! Final merging will take place on the CLI.', 'ok');
+    setStatus('success');
+  } catch (err) {
+    showError(`Sync execution failed: ${err.message}`);
+    log(`[CLI Sync] Error: ${err.message}`, 'error');
+  } finally {
+    isCliSyncRunning = false;
+    cliStartBtn.disabled = false;
+    cliStartBtn.textContent = '🚀 Start Sync Automation';
+    await updateCliUI();
+  }
+});
+

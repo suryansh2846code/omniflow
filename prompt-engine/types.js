@@ -49,10 +49,62 @@
  */
 
 /**
+ * @typedef {Object} EditorDNA
+ * @property {string} continuityRules
+ * @property {string} compositionRules
+ * @property {string} colorRules
+ * @property {string} storytellingRules
+ * @property {string} pacingRules
+ * @property {string} transitionRules
+ */
+
+/**
+ * @typedef {Object} ClipRole
+ * @property {number} clipIndex
+ * @property {string} role
+ */
+
+/**
+ * @typedef {Object} StoryPlan
+ * @property {string} hook
+ * @property {string} build
+ * @property {string} payoff
+ * @property {ClipRole[]} clipRoles
+ */
+
+/**
+ * @typedef {Object} CutPoint
+ * @property {number} timestamp
+ * @property {string} reason
+ * @property {number} confidence
+ */
+
+/**
+ * @typedef {Object} CutPlanner
+ * @property {CutPoint[]} recommendedCuts
+ */
+
+/**
  * @typedef {Object} ClipRelationship
  * @property {string} previousClipSummary
  * @property {string} currentClipGoal
  * @property {string} nextClipTransition
+ */
+
+/**
+ * @typedef {Object} ShotPlanner
+ * @property {string} shotType
+ * @property {string} framing
+ * @property {string} cameraMovement
+ * @property {string} focalStyle
+ * @property {string} purpose
+ */
+
+/**
+ * @typedef {Object} TransitionPlanner
+ * @property {string} transitionIn
+ * @property {string} transitionOut
+ * @property {string} reason
  */
 
 /**
@@ -69,6 +121,8 @@
  * @property {number} timestamps.start
  * @property {number} timestamps.end
  * @property {ClipRelationship} relationship
+ * @property {ShotPlanner} shotPlanner
+ * @property {TransitionPlanner} transitionPlanner
  * @property {ThreeLayerPrompt} threeLayerPrompt
  * @property {string} finalAssembledPrompt
  */
@@ -86,6 +140,9 @@
  * @property {MasterContext} masterContext
  * @property {CharacterSheet} characterSheet
  * @property {VisualDNA} visualDNA
+ * @property {EditorDNA} editorDNA
+ * @property {StoryPlan} storyPlan
+ * @property {CutPlanner} cutPlanner
  * @property {ClipPromptOutput[]} clipPrompts
  * @property {ConsistencyRule[]} consistencyRules
  */

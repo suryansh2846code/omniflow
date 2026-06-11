@@ -1125,8 +1125,210 @@
       });
       return true;
     }
+
+    // ── OMNIFLOW_SYNC_RUN_CLIP (Phase 5 CLI Sync) ──────────
+    if (message.type === 'OMNIFLOW_SYNC_RUN_CLIP') {
+      console.log(`[OmniFlow][Sync] Received command to run Clip #${message.index}`);
+      (async () => {
+        try {
+          const result = await performSyncGenerateForClip(message.index, message.prompt);
+          sendResponse(result);
+        } catch (err) {
+          console.error(`[OmniFlow][Sync] Failed for Clip #${message.index}:`, err);
+          sendResponse({ success: false, error: err.message });
+        }
+      })();
+      return true;
+    }
   });
+
+  async function performSyncGenerateForClip(clipIndex, clipPrompt) {
+    // 1. Reset locks and state
+    window.__omniflowGenerateInProgress = false;
+    if (window.__omniflowGenState) {
+      window.__omniflowGenState.status = 'waiting';
+      window.__omniflowGenState.promptAccepted = false;
+      window.__omniflowGenState.generationStarted = false;
+      window.__omniflowGenState.generationCompleted = false;
+    }
+
+    // Acquire lock
+    window.__omniflowGenerateInProgress = true;
+    
+    // Find editor
+    const editor = findEditor();
+    if (!editor) {
+      window.__omniflowGenerateInProgress = false;
+      throw new Error('Editor not found. Make sure you are on a Flow/Omni editor page.');
+    }
+
+    // Inject prompt
+    const isContentEditable = editor.getAttribute('contenteditable') === 'true' || editor.isContentEditable;
+    if (isContentEditable) {
+      injectIntoContentEditable(editor, clipPrompt);
+    } else {
+      injectIntoTextarea(editor, clipPrompt);
+    }
+
+    // Wait 500ms
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Find button
+    let button = null;
+    const composerContainer = discoverComposerContainer(editor);
+    if (composerContainer) {
+      button = composerContainer.querySelector('button[aria-label="Send message"]');
+    }
+    if (!button) {
+      button = document.querySelector('button[aria-label="Send message"]');
+    }
+    if (!button) {
+      const fb = findGenerateButton();
+      button = fb.button;
+    }
+
+    if (!button) {
+      window.__omniflowGenerateInProgress = false;
+      throw new Error('Send/Generate button not found.');
+    }
+
+    // Click button
+    button.focus();
+    button.click();
+
+    // Helper to check acceptance
+    function checkAcceptance() {
+      const textRemaining = readEditorText(editor).trim();
+      const isDisappeared = textRemaining.length === 0;
+      const isDisabled = button.disabled || button.getAttribute('aria-disabled') === 'true';
+      const genInfo = isPageGenerating();
+      return isDisappeared || isDisabled || genInfo.generating;
+    }
+
+    // Wait up to 4s for acceptance
+    let accepted = false;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (checkAcceptance()) {
+        accepted = true;
+        break;
+      }
+    }
+
+    // Try fallback click if not accepted
+    if (!accepted) {
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (checkAcceptance()) {
+          accepted = true;
+          break;
+        }
+      }
+    }
+
+    if (!accepted) {
+      window.__omniflowGenerateInProgress = false;
+      throw new Error('Prompt was not accepted by the editor.');
+    }
+
+    window.__omniflowGenState.promptAccepted = true;
+    console.log(`[OmniFlow][Sync] Clip #${clipIndex} prompt accepted. Monitoring generation...`);
+
+    // Poll until generation completes
+    let startTime = Date.now();
+    let generationDetected = false;
+    
+    while (true) {
+      // Check timeout (5 minutes)
+      if (Date.now() - startTime > 5 * 60 * 1000) {
+        window.__omniflowGenerateInProgress = false;
+        throw new Error('Generation timed out (exceeded 5 minutes).');
+      }
+
+      const genInfo = isPageGenerating();
+      const completed = isGenerationCompleted();
+
+      if (genInfo.generating) {
+        generationDetected = true;
+        window.__omniflowGenState.status = 'generating';
+        window.__omniflowGenState.generationStarted = true;
+      }
+
+      if (completed) {
+        window.__omniflowGenState.status = 'completed';
+        window.__omniflowGenState.generationCompleted = true;
+        break;
+      }
+
+      // If we waited 20s and no generation is detected at all, error out
+      if (!generationDetected && (Date.now() - startTime > 20000)) {
+        window.__omniflowGenerateInProgress = false;
+        throw new Error('No video generation activity detected within 20 seconds.');
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    console.log(`[OmniFlow][Sync] Clip #${clipIndex} generation complete! Finding video file...`);
+
+    // Locate video element
+    const videoEl = document.querySelector('video');
+    if (!videoEl || !videoEl.src) {
+      window.__omniflowGenerateInProgress = false;
+      throw new Error('Generation complete, but no video element or source URL found on page.');
+    }
+
+    const videoSrc = videoEl.src;
+    console.log(`[OmniFlow][Sync] Found video src: ${videoSrc}`);
+
+    // If it's a blob url, we must fetch it here in content context
+    if (videoSrc.startsWith('blob:')) {
+      console.log(`[OmniFlow][Sync] Fetching same-origin blob: ${videoSrc}`);
+      const res = await fetch(videoSrc);
+      const blob = await res.blob();
+      
+      console.log(`[OmniFlow][Sync] Same-origin blob fetched (${blob.size} bytes). Uploading...`);
+      await uploadBlobToCli(blob, clipIndex);
+    } else {
+      // It's a remote URL. Try to fetch in content script first
+      try {
+        console.log(`[OmniFlow][Sync] Attempting to fetch remote URL: ${videoSrc}`);
+        const res = await fetch(videoSrc);
+        const blob = await res.blob();
+        await uploadBlobToCli(blob, clipIndex);
+      } catch (corsErr) {
+        console.warn(`[OmniFlow][Sync] CORS error in page context. Delegating remote fetch to popup: ${videoSrc}`);
+        window.__omniflowGenerateInProgress = false;
+        return {
+          success: true,
+          delegateFetch: true,
+          videoUrl: videoSrc,
+          index: clipIndex
+        };
+      }
+    }
+
+    // Reset generate lock
+    window.__omniflowGenerateInProgress = false;
+    return { success: true };
+  }
+
+  async function uploadBlobToCli(blob, clipIndex) {
+    const res = await fetch(`http://localhost:3001/upload-clip?index=${clipIndex}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'video/mp4'
+      },
+      body: blob
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`Orchestrator server rejected upload: ${txt}`);
+    }
+  }
 
   console.log('[OmniFlow][Content] Message router ready (OMNIFLOW_SCAN + OMNIFLOW_INJECT + OMNIFLOW_GENERATE + OMNIFLOW_INSPECT_COMPOSER + OMNIFLOW_GET_STATUS).');
 
 })();
+

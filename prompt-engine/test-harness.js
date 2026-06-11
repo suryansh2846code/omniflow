@@ -1,3 +1,25 @@
+import fs from 'fs';
+import path from 'path';
+
+// Load environment variables from .env file if it exists
+if (fs.existsSync('.env')) {
+  fs.readFileSync('.env', 'utf8').split(/\r?\n/).forEach(line => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return;
+    const idx = trimmed.indexOf('=');
+    if (idx > 0) {
+      const k = trimmed.slice(0, idx).trim();
+      let v = trimmed.slice(idx + 1).trim();
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+        v = v.slice(1, -1);
+      }
+      if (!process.env[k]) {
+        process.env[k] = v;
+      }
+    }
+  });
+}
+
 import { PromptIntelligenceEngine } from './index.js';
 
 // Setup test input
@@ -53,6 +75,30 @@ const mockGeminiResponse = {
     cameraLanguage: "Anamorphic widescreen lens, subtle lens flares, organic handheld motion",
     editingStyle: "Rhythmic rapid cuts on action beats, seamless match-cuts"
   },
+  editorDNA: {
+    continuityRules: "Maintain character screen direction (180-degree rule). Enforce matching actions on cuts.",
+    compositionRules: "Enforce the rule of thirds. Center subjects during direct address. Guard nose room and eye-line levels.",
+    colorRules: "Protect skin tone fidelity. Match color balance across all cuts.",
+    storytellingRules: "Ensure hook grabs attention in first 5s. Maintain character motivation and chronological clarity.",
+    pacingRules: "Establish rhythmic cutting rates. Match scene changes on visual beats.",
+    transitionRules: "Avoid visual jump-cuts unless stylistically motivated. Dissolve for temporal passages, cut for active narrative changes."
+  },
+  storyPlan: {
+    hook: "Introduce tech hacker creator walking down neon street.",
+    build: "Reveal stock market cybernetic boards emphasizing digital transformation.",
+    payoff: "Hacker walks away into cyber alleyway, showing scale of dystopia.",
+    clipRoles: [
+      { clipIndex: 0, role: "Hook" },
+      { clipIndex: 1, role: "Build" },
+      { clipIndex: 2, role: "Payoff" }
+    ]
+  },
+  cutPlanner: {
+    recommendedCuts: [
+      { timestamp: 5.5, reason: "Mid-clip subject gaze shift", confidence: 0.85 },
+      { timestamp: 15.0, reason: "Focus shifts to digital billboard graphics", confidence: 0.9 }
+    ]
+  },
   clipPrompts: [
     {
       clipIndex: 0,
@@ -62,9 +108,21 @@ const mockGeminiResponse = {
         currentClipGoal: "Introduce the tech hacker creator speaking to his audience down a dark, neon-lit cyberpunk alleyway.",
         nextClipTransition: "Cut to extreme close-up of a digital billboard."
       },
+      shotPlanner: {
+        shotType: "Medium Close-up",
+        framing: "Subject centered, rule of thirds matching eye-lines",
+        cameraMovement: "Slow tracking dolly push-in",
+        focalStyle: "Anamorphic shallow depth of field",
+        purpose: "Establish character connection and dialogue delivery"
+      },
+      transitionPlanner: {
+        transitionIn: "Fade from black",
+        transitionOut: "Standard Match Action Cut",
+        reason: "Narrative introduction starting"
+      },
       threeLayerPrompt: {
-        master: "Sci-Fi cyberpunk scene featuring a slim athletic street hacker with spiky silver-grey hair and a glowing cybernetic left eye. He is wearing a reflective black vinyl hoodie with purple fiber-optic accents and a holographic headset around his neck. Style: Electric cyan and neon magenta color palette, dark steel blues, high-contrast neon underlighting.",
-        clip: "He walks down a wet, rain-slicked futuristic sidewalk, speaking directly to the camera in a medium close-up shot.",
+        master: "",
+        clip: "He walks down a wet, rain-slicked futuristic sidewalk, speaking directly to the camera.",
         technical: "Shot on wide anamorphic lens, shallow depth of field, subtle lens flare, wet ground reflections, 8k resolution, cinematic quality."
       },
       finalAssembledPrompt: ""
@@ -77,8 +135,20 @@ const mockGeminiResponse = {
         currentClipGoal: "Focus on the hacker pointing at a glowing digital billboard displaying high-frequency stock charts.",
         nextClipTransition: "Whip pan transition to a wide alleyway."
       },
+      shotPlanner: {
+        shotType: "Close-up",
+        framing: "Asymmetrical framing split between character and billboard",
+        cameraMovement: "Static lock-off shot with panning emphasis",
+        focalStyle: "Volumetric neon bloom focus",
+        purpose: "Highlight digital interface interaction details"
+      },
+      transitionPlanner: {
+        transitionIn: "Standard Match Action Cut",
+        transitionOut: "Whip Pan Transition",
+        reason: "Rhythmic fast pacing shift"
+      },
       threeLayerPrompt: {
-        master: "Sci-Fi cyberpunk scene featuring a slim athletic street hacker with spiky silver-grey hair and a glowing cybernetic left eye. He is wearing a reflective black vinyl hoodie with purple fiber-optic accents. Style: Electric cyan and neon magenta lighting.",
+        master: "",
         clip: "Close-up of the hacker pointing his hand towards a glowing, high-contrast digital holographic billboard showing stock market charts.",
         technical: "Extreme close-up shot, shallow depth of field, neon bloom effect, volumetric steam haze, hyper-detailed."
       },
@@ -90,10 +160,26 @@ const mockGeminiResponse = {
       relationship: {
         previousClipSummary: "Hacker points at digital stocks billboard.",
         currentClipGoal: "Hacker walks away from the camera into a dark, foggy narrow street, turning back for a final look.",
-        nextClipTransition: "Slow fade to black."
+        shotType: "Wide Shot",
+        framing: "Asymmetrical wide framing showing scale of buildings",
+        cameraMovement: "Low angle wide track back",
+        focalStyle: "Deep background focus with dense fog",
+        purpose: "Create thematic exit payoff visual resolution"
+      },
+      shotPlanner: {
+        shotType: "Wide Shot",
+        framing: "Asymmetrical wide framing showing scale of buildings",
+        cameraMovement: "Low angle wide track back",
+        focalStyle: "Deep background focus with dense fog",
+        purpose: "Create thematic exit payoff visual resolution"
+      },
+      transitionPlanner: {
+        transitionIn: "Whip Pan Transition",
+        transitionOut: "Slow Fade to Black",
+        reason: "Narrative finale resolution"
       },
       threeLayerPrompt: {
-        master: "Sci-Fi cyberpunk scene featuring a slim athletic street hacker in a reflective black vinyl hoodie with purple fiber-optic accents. Style: Electric cyan and neon magenta color palette, dark steel blues, moody neon lights.",
+        master: "",
         clip: "Wide shot of the hacker walking away from the camera down a narrow, dark, foggy neon alleyway, pausing to look back over his shoulder.",
         technical: "Low angle wide shot, slow tracking push-in, volumetric lighting, dense fog, anamorphic lens flare, cinematic grain."
       },
@@ -105,7 +191,7 @@ const mockGeminiResponse = {
 
 async function run() {
   console.log("==================================================");
-  console.log("PROMPT INTELLIGENCE ENGINE V2 TEST HARNESS");
+  console.log("PROMPT INTELLIGENCE ENGINE V3 TEST HARNESS");
   console.log("==================================================");
 
   const apiKey = process.env.GEMINI_API_KEY;
@@ -115,10 +201,8 @@ async function run() {
     console.log("[Test] Running in DRY-RUN / MOCK MODE.");
     console.log("--------------------------------------------------");
     
-    // Create an engine instance that mocks the service
     const engine = new PromptIntelligenceEngine({ apiKey: "mock-key" });
     
-    // Inject mock generator behavior
     engine.geminiService.generateStructuredPrompt = async function(meta, prompt) {
       console.log("[Mock Gemini] generateStructuredPrompt called.");
       console.log(`[Mock Gemini] User prompt target: "${prompt}"`);
@@ -129,18 +213,27 @@ async function run() {
       console.log("[Test] Processing inputs...");
       const result = await engine.process(mockInput);
       console.log("[Test] Execution successful!");
-      console.log("\n--- RESULT PAYLOAD ---");
+      console.log("\n--- RESULT PAYLOAD (V3 AI EDITING PLANNER) ---");
       console.log(JSON.stringify(result, null, 2));
-      console.log("----------------------\n");
+      console.log("----------------------------------------------\n");
 
       // Verify structure assertions
       assertField(result, 'masterContext');
       assertField(result, 'characterSheet');
       assertField(result, 'visualDNA');
+      assertField(result, 'editorDNA');
+      assertField(result, 'storyPlan');
+      assertField(result, 'cutPlanner');
       assertField(result, 'clipPrompts');
       assertField(result, 'consistencyRules');
 
-      console.log("[Test] Assertion checklist passed successfully!");
+      console.log("\n--- STITCHED 8-LAYER PROMPTS ---");
+      result.clipPrompts.forEach(clip => {
+        console.log(`\n[Clip ${clip.clipIndex}]`);
+        console.log(`FINAL PROMPT: "${clip.finalAssembledPrompt}"`);
+      });
+
+      console.log("\n[Test] Assertion checklist passed successfully!");
     } catch (err) {
       console.error("[Test] Dry-run execution failed:", err);
       process.exit(1);
@@ -161,6 +254,9 @@ async function run() {
       assertField(result, 'masterContext');
       assertField(result, 'characterSheet');
       assertField(result, 'visualDNA');
+      assertField(result, 'editorDNA');
+      assertField(result, 'storyPlan');
+      assertField(result, 'cutPlanner');
       assertField(result, 'clipPrompts');
       assertField(result, 'consistencyRules');
       

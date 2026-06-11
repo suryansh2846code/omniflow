@@ -73,6 +73,105 @@ export class VideoIntelligenceLayer {
   }
 
   /**
+   * Translates a list of video clips into a structured understanding object, and then
+   * formats it to be directly consumed by Prompt Intelligence Engine v2.
+   * 
+   * @param {string[]} clipPaths Array of paths to clip files (e.g. clip_1.mp4, clip_2.mp4)
+   * @param {string} userPrompt Target prompt instruction (e.g. "make it cyberpunk")
+   * @param {Object} [options] Configurations (tempDir)
+   * @returns {Promise<Object>}
+   */
+  async processClips(clipPaths, userPrompt, options = {}) {
+    const tempDir = options.tempDir || path.join(process.cwd(), 'video-intelligence-temp');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    const allFramePaths = [];
+    const clipsMetadata = [];
+    
+    try {
+      // 1. Read metadata for all clips and build chronological timeline
+      let currentStart = 0;
+      for (let i = 0; i < clipPaths.length; i++) {
+        const clipPath = clipPaths[i];
+        console.log(`[VideoIntel] Reading metadata for clip ${i + 1}: ${clipPath}`);
+        const meta = this.ffmpegHelper.getVideoMetadata(clipPath);
+        const duration = meta.duration;
+        const end = Number((currentStart + duration).toFixed(2));
+        
+        clipsMetadata.push({
+          path: clipPath,
+          duration,
+          fps: meta.fps,
+          resolution: meta.resolution,
+          codec: meta.codec,
+          start: currentStart,
+          end
+        });
+        currentStart = end;
+      }
+
+      // 2. Extract first, middle, last frames for every clip
+      for (let i = 0; i < clipsMetadata.length; i++) {
+        const clipMeta = clipsMetadata[i];
+        console.log(`[VideoIntel] Extracting frames for clip ${i + 1} (${clipMeta.path})`);
+        const framePaths = this.ffmpegHelper.extractClipFrames(clipMeta.path, tempDir, i + 1);
+        clipMeta.frameCount = framePaths.length;
+        allFramePaths.push(...framePaths);
+      }
+
+      // 3. Query Gemini Vision model to compile visual metrics
+      console.log(`[VideoIntel] Sending ${allFramePaths.length} keyframes to Gemini Vision model...`);
+      let analysisResult;
+      
+      if (this.geminiVisionService.apiKey === 'mock-key' || !this.geminiVisionService.apiKey) {
+        console.warn("[VideoIntel] No active API key found or mock requested. Simulating Gemini vision response.");
+        analysisResult = this.geminiVisionService.getMockClipsAnalysis(clipsMetadata.length);
+      } else {
+        analysisResult = await this.geminiVisionService.analyzeClips(allFramePaths, clipsMetadata);
+      }
+
+      // 4. Translate output to Prompt Intelligence v2 schema
+      console.log("[VideoIntel] Mapping analysis to Prompt Intelligence input format...");
+      const promptEngineInput = DataTranslator.translateClips(analysisResult, userPrompt, clipsMetadata);
+
+      // Cleanup temporary frame files
+      this.cleanup(allFramePaths, tempDir);
+
+      return {
+        videoUnderstanding: analysisResult,
+        promptEngineInput
+      };
+    } catch (err) {
+      console.error("[VideoIntel] processClips pipeline error:", err.message);
+      
+      // Fallback behavior
+      const mockAnalysis = this.geminiVisionService.getMockClipsAnalysis(clipPaths.length);
+      
+      // Re-map simple metadata defaults if read failed
+      const fallbackMetadata = clipPaths.map((cp, idx) => ({
+        path: cp,
+        duration: 10.0,
+        fps: 30,
+        resolution: "1920x1080",
+        codec: "h264",
+        start: idx * 10,
+        end: (idx + 1) * 10
+      }));
+      
+      const promptEngineInput = DataTranslator.translateClips(mockAnalysis, userPrompt, fallbackMetadata);
+      this.cleanup(allFramePaths, tempDir);
+
+      return {
+        videoUnderstanding: mockAnalysis,
+        promptEngineInput,
+        error: err.message
+      };
+    }
+  }
+
+  /**
    * Cleans up temporary extracted keyframe images.
    * @param {string[]} paths 
    * @param {string} tempDir 

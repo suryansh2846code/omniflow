@@ -12,7 +12,8 @@
   "permissions": [
     "activeTab",
     "scripting",
-    "tabs"
+    "tabs",
+    "downloads"
   ],
 
   "host_permissions": [

@@ -57,6 +57,56 @@ export class GeminiService {
           },
           required: ["colorPalette", "lighting", "cameraLanguage", "editingStyle"]
         },
+        editorDNA: {
+          type: "OBJECT",
+          properties: {
+            continuityRules: { type: "STRING" },
+            compositionRules: { type: "STRING" },
+            colorRules: { type: "STRING" },
+            storytellingRules: { type: "STRING" },
+            pacingRules: { type: "STRING" },
+            transitionRules: { type: "STRING" }
+          },
+          required: ["continuityRules", "compositionRules", "colorRules", "storytellingRules", "pacingRules", "transitionRules"]
+        },
+        storyPlan: {
+          type: "OBJECT",
+          properties: {
+            hook: { type: "STRING" },
+            build: { type: "STRING" },
+            payoff: { type: "STRING" },
+            clipRoles: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  clipIndex: { type: "INTEGER" },
+                  role: { type: "STRING" }
+                },
+                required: ["clipIndex", "role"]
+              }
+            }
+          },
+          required: ["hook", "build", "payoff", "clipRoles"]
+        },
+        cutPlanner: {
+          type: "OBJECT",
+          properties: {
+            recommendedCuts: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  timestamp: { type: "NUMBER" },
+                  reason: { type: "STRING" },
+                  confidence: { type: "NUMBER" }
+                },
+                required: ["timestamp", "reason", "confidence"]
+              }
+            }
+          },
+          required: ["recommendedCuts"]
+        },
         clipPrompts: {
           type: "ARRAY",
           items: {
@@ -80,6 +130,26 @@ export class GeminiService {
                 },
                 required: ["previousClipSummary", "currentClipGoal", "nextClipTransition"]
               },
+              shotPlanner: {
+                type: "OBJECT",
+                properties: {
+                  shotType: { type: "STRING" },
+                  framing: { type: "STRING" },
+                  cameraMovement: { type: "STRING" },
+                  focalStyle: { type: "STRING" },
+                  purpose: { type: "STRING" }
+                },
+                required: ["shotType", "framing", "cameraMovement", "focalStyle", "purpose"]
+              },
+              transitionPlanner: {
+                type: "OBJECT",
+                properties: {
+                  transitionIn: { type: "STRING" },
+                  transitionOut: { type: "STRING" },
+                  reason: { type: "STRING" }
+                },
+                required: ["transitionIn", "transitionOut", "reason"]
+              },
               threeLayerPrompt: {
                 type: "OBJECT",
                 properties: {
@@ -91,7 +161,7 @@ export class GeminiService {
               },
               finalAssembledPrompt: { type: "STRING" }
             },
-            required: ["clipIndex", "timestamps", "relationship", "threeLayerPrompt", "finalAssembledPrompt"]
+            required: ["clipIndex", "timestamps", "relationship", "shotPlanner", "transitionPlanner", "threeLayerPrompt", "finalAssembledPrompt"]
           }
         },
         consistencyRules: {
@@ -108,7 +178,7 @@ export class GeminiService {
           }
         }
       },
-      required: ["masterContext", "characterSheet", "visualDNA", "clipPrompts", "consistencyRules"]
+      required: ["masterContext", "characterSheet", "visualDNA", "editorDNA", "storyPlan", "cutPlanner", "clipPrompts", "consistencyRules"]
     };
 
     const requestBody = {

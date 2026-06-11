@@ -1,60 +1,93 @@
 export class ConsistencyEngine {
   /**
-   * Enforces consistency policies on the validated output, post-processing
-   * and compiling the final prompt for each clip.
+   * Enforces consistency policies and compiles the final 8-layer prompt.
    * @param {Object} data 
    * @returns {Object}
    */
   static enforce(data) {
-    const { characterSheet, visualDNA, clipPrompts } = data;
+    const { masterContext, characterSheet, visualDNA, editorDNA, storyPlan, clipPrompts } = data;
 
-    // Build the master context string based on the Character Sheet and Visual DNA
-    const masterSubject = [
+    // 1. Compile MASTER_CONTEXT layer
+    const masterContextStr = `Genre: ${masterContext.visualGenre || 'Cinematic'}. Setting: ${masterContext.overallEnvironment || 'ambient setting'}.`;
+
+    // 2. Compile CHARACTER_SHEET layer
+    const charSheetStr = [
       characterSheet.identity,
-      characterSheet.face ? `face: ${characterSheet.face}` : '',
-      characterSheet.bodyType ? `body: ${characterSheet.bodyType}` : '',
-      characterSheet.clothing ? `clothing: ${characterSheet.clothing}` : '',
-      characterSheet.accessories ? `accessories: ${characterSheet.accessories}` : ''
-    ].filter(Boolean).join(', ');
+      characterSheet.face ? `Face: ${characterSheet.face}` : '',
+      characterSheet.clothing ? `Clothing: ${characterSheet.clothing}` : '',
+      characterSheet.accessories ? `Accessories: ${characterSheet.accessories}` : '',
+      characterSheet.bodyType ? `Build: ${characterSheet.bodyType}` : ''
+    ].filter(Boolean).join('. ');
 
-    const masterAesthetic = [
-      `style: ${visualDNA.colorPalette || 'Cohesive color grade'}`,
-      `lighting: ${visualDNA.lighting || 'Balanced lighting'}`,
-      `genre: ${data.masterContext?.visualGenre || 'Cinematic'}`
-    ].filter(Boolean).join(', ');
+    // 3. Compile VISUAL_DNA layer
+    const visualDNAStr = `Visual theme: ${visualDNA.colorPalette || 'cohesive grading'}. Lighting: ${visualDNA.lighting || 'balanced lights'}. Style: ${visualDNA.cameraLanguage || 'standard lenses'}.`;
+
+    // 4. Compile EDITOR_DNA layer
+    const editorDNAStr = `Editor rules: [Continuity: ${editorDNA.continuityRules}] [Composition: ${editorDNA.compositionRules}] [Color: ${editorDNA.colorRules}] [Pacing: ${editorDNA.pacingRules}].`;
 
     // Post-process each clip
     data.clipPrompts = clipPrompts.map(clip => {
+      // 5. Compile STORY_PLAN layer
+      // Find role assigned to this clip
+      const roleObj = (storyPlan.clipRoles || []).find(r => r.clipIndex === clip.clipIndex);
+      const role = roleObj ? roleObj.role : "Build";
+      let storyPlanStr = "";
+      if (role === "Hook") {
+        storyPlanStr = `Story Hook: ${storyPlan.hook || 'Grab attention'}.`;
+      } else if (role === "Payoff") {
+        storyPlanStr = `Story Payoff: ${storyPlan.payoff || 'Resolve narrative climax'}.`;
+      } else {
+        storyPlanStr = `Story Build: ${storyPlan.build || 'Develop narrative tension'}.`;
+      }
+
+      // 6. Compile SHOT_PLAN layer
+      const shot = clip.shotPlanner;
+      const shotPlanStr = `Framing: ${shot.shotType} (${shot.framing}). Camera motion: ${shot.cameraMovement} with ${shot.focalStyle} focal length (Purpose: ${shot.purpose}).`;
+
+      // 7. Compile CLIP_GOAL layer
       let { master, clip: action, technical } = clip.threeLayerPrompt || {};
-
-      // If the model returned empty prompt layers, construct them dynamically to guarantee consistency
-      if (!master || master.trim().length === 0) {
-        master = `Scene features ${masterSubject}. Overall environment: ${data.masterContext.overallEnvironment || 'the scene'}. Visual style: ${masterAesthetic}.`;
-      }
-
       if (!action || action.trim().length === 0) {
-        action = `Action: ${clip.relationship.currentClipGoal || 'The subject proceeds with the scene.'}`;
+        action = clip.relationship.currentClipGoal || "The subject proceeds with the action.";
       }
+      const clipGoalStr = `Action Goal: ${action}`;
 
+      // 8. Compile TECHNICAL_PROMPT layer
       if (!technical || technical.trim().length === 0) {
-        technical = `Camera: ${visualDNA.cameraLanguage || 'cinematic lens, standard motion'}. Quality: highly detailed, realistic, high fidelity, 8k resolution.`;
+        technical = `Transition: entrance ${clip.transitionPlanner.transitionIn}, exit ${clip.transitionPlanner.transitionOut}. Render: 8k resolution, cinematic focus, ultra-detailed.`;
       }
+      const technicalPromptStr = `Technical: ${technical}`;
 
-      // Clean and normalize spacing/punctuation
-      const cleanMaster = this.normalizeClause(master);
-      const cleanAction = this.normalizeClause(action);
-      const cleanTechnical = this.normalizeClause(technical);
+      // Normalize all clauses
+      const normalizedMasterContext = this.normalizeClause(masterContextStr);
+      const normalizedCharSheet = this.normalizeClause(charSheetStr);
+      const normalizedVisualDNA = this.normalizeClause(visualDNAStr);
+      const normalizedEditorDNA = this.normalizeClause(editorDNAStr);
+      const normalizedStoryPlan = this.normalizeClause(storyPlanStr);
+      const normalizedShotPlan = this.normalizeClause(shotPlanStr);
+      const normalizedClipGoal = this.normalizeClause(clipGoalStr);
+      const normalizedTechnicalPrompt = this.normalizeClause(technicalPromptStr);
 
-      // Programmatically assemble the final prompt from the three layers
-      const finalAssembledPrompt = `${cleanMaster} ${cleanAction} ${cleanTechnical}`;
+      // Stitch all 8 layers programmatically
+      const finalAssembledPrompt = [
+        normalizedMasterContext,
+        normalizedCharSheet,
+        normalizedVisualDNA,
+        normalizedEditorDNA,
+        normalizedStoryPlan,
+        normalizedShotPlan,
+        normalizedClipGoal,
+        normalizedTechnicalPrompt
+      ].join(' ');
+
+      // Also ensure threeLayerPrompt values are set/updated
+      clip.threeLayerPrompt = {
+        master: `${normalizedMasterContext} ${normalizedCharSheet} ${normalizedVisualDNA}`.trim(),
+        clip: `${normalizedStoryPlan} ${normalizedShotPlan} ${normalizedClipGoal}`.trim(),
+        technical: normalizedTechnicalPrompt
+      };
 
       return {
         ...clip,
-        threeLayerPrompt: {
-          master: cleanMaster,
-          clip: cleanAction,
-          technical: cleanTechnical
-        },
         finalAssembledPrompt
       };
     });
