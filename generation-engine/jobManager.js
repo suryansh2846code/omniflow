@@ -71,15 +71,21 @@ export class JobManager {
       status.generationCompleted = monitorResult.generationCompleted;
       status.videoUrl = monitorResult.videoUrl;
 
-      if (status.generationCompleted && status.videoUrl && downloadOutputDir) {
-        console.log(`[JobManager] Downloading generated video for ${clipId}...`);
-        const downloadManager = new DownloadManager(client, this.options);
-        const downloadedPath = await downloadManager.downloadVideo(
-          status.videoUrl, 
-          downloadOutputDir, 
-          `${clipId}_generated.mp4`
-        );
-        status.downloadedPath = downloadedPath;
+      if (status.generationCompleted) {
+        if (!status.videoUrl) {
+          throw new Error("Generation completed but video URL was not found.");
+        }
+
+        if (downloadOutputDir) {
+          console.log(`[JobManager] Downloading generated video for ${clipId}...`);
+          const downloadManager = new DownloadManager(client, this.options);
+          const downloadedPath = await downloadManager.downloadVideo(
+            status.videoUrl, 
+            downloadOutputDir, 
+            `${clipId}_generated.mp4`
+          );
+          status.downloadedPath = downloadedPath;
+        }
       }
 
       console.log(`[JobManager] Job completed successfully for Clip: ${clipId}`);

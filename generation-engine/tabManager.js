@@ -126,6 +126,10 @@ export class TabManager {
       `--remote-debugging-port=${this.chromePort}`,
       '--no-first-run',
       '--no-default-browser-check',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      '--disable-background-media-suspend',
       `--user-data-dir=${profileDir}`
     ], {
       detached: true,
@@ -171,12 +175,37 @@ export class TabManager {
     await this.client.send('Runtime.enable');
     await this.client.send('DOM.enable');
 
+    // Enable focus emulation to run background tabs at full speed
+    console.log(`[TabManager] Enabling focus emulation...`);
+    await this.client.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(err => {
+      console.warn(`[TabManager] Focus emulation failed to enable: ${err.message}`);
+    });
+
     // Perform explicit navigation via CDP Page.navigate
     console.log(`[TabManager] Navigating to: ${url}`);
     await this.client.send('Page.navigate', { url });
 
     // Wait for the page to finish loading
     await this.waitForLoad(url);
+
+    // Inject document visibility overrides so page never pauses in background
+    console.log(`[TabManager] Injecting document visibility overrides...`);
+    await this.client.send('Runtime.evaluate', {
+      expression: `
+        (() => {
+          try {
+            Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+            Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+            document.dispatchEvent(new Event('visibilitychange'));
+            console.log('[OmniFlow] Visibility overrides injected successfully.');
+          } catch (e) {
+            console.error('[OmniFlow] Failed to inject visibility overrides:', e);
+          }
+        })()
+      `
+    }).catch(err => {
+      console.warn(`[TabManager] Visibility override injection failed: ${err.message}`);
+    });
 
     return {
       tabId: this.tabId,

@@ -142,10 +142,13 @@ export class GenerationMonitor {
             });
 
             const hasCompletedText = bodyText.includes('Your video is ready!');
-            const completed = !!(completionButton || hasCompletedText);
+            const completionIndicator = !!(completionButton || hasCompletedText);
 
             const videoEl = document.querySelector('video');
             const videoUrl = videoEl ? videoEl.src : null;
+            const hasValidVideoUrl = videoUrl && (videoUrl.startsWith('blob:') || videoUrl.startsWith('http'));
+
+            const completed = !!(completionIndicator && hasValidVideoUrl);
 
             return { generating, completed, videoUrl };
           })()

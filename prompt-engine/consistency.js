@@ -103,6 +103,11 @@ export class ConsistencyEngine {
         finalAssembledPrompt = assembledParts.map(p => this.normalizeClause(p)).join(' ');
       }
 
+      // Explicitly prefix prompt to trigger Video Generation Mode on Gemini web interface
+      if (finalAssembledPrompt && !finalAssembledPrompt.toLowerCase().startsWith('create a video')) {
+        finalAssembledPrompt = `Create a video of: ${finalAssembledPrompt}`;
+      }
+
       // Also ensure threeLayerPrompt values are set/updated
       clip.threeLayerPrompt = {
         master: master ? this.normalizeClause(master) : `${normalizedMasterContext} ${normalizedCharSheet} ${normalizedVisualDNA}`.trim(),

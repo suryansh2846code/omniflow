@@ -133,15 +133,23 @@ For the sceneTimeline array:
     };
 
     let data;
-    try {
-      console.log(`[GeminiVisionService] Sending analyzeVideoFrames request with model: ${this.modelName}`);
-      data = await makeRequest(this.modelName);
-    } catch (err) {
-      if (this.modelName === 'gemini-2.5-flash') {
-        console.warn(`[GeminiVisionService] ${this.modelName} analyzeVideoFrames request failed: ${err.message}. Retrying with gemini-1.5-flash fallback...`);
-        data = await makeRequest('gemini-1.5-flash');
-      } else {
-        throw err;
+    const maxRetries = 5;
+    let attempt = 0;
+    while (attempt < maxRetries) {
+      try {
+        console.log(`[GeminiVisionService] Sending analyzeVideoFrames request with model: ${this.modelName} (Attempt ${attempt + 1}/${maxRetries})`);
+        data = await makeRequest(this.modelName);
+        break;
+      } catch (err) {
+        attempt++;
+        const isTransient = err.message.includes('503') || err.message.includes('429') || err.message.toLowerCase().includes('demand') || err.message.toLowerCase().includes('quota') || err.message.toLowerCase().includes('rate') || err.message.toLowerCase().includes('unavailable');
+        if (isTransient && attempt < maxRetries) {
+          const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+          console.warn(`[GeminiVisionService] Transient error (503/429) on attempt ${attempt}: ${err.message}. Retrying in ${Math.round(delay)}ms...`);
+          await new Promise(r => setTimeout(r, delay));
+        } else {
+          throw new Error(`Gemini Vision API request failed after ${attempt} attempts: ${err.message}`);
+        }
       }
     }
 
@@ -301,15 +309,23 @@ For the sceneTimeline array:
     };
 
     let data;
-    try {
-      console.log(`[GeminiVisionService] Sending analyzeClips request with model: ${this.modelName}`);
-      data = await makeRequest(this.modelName);
-    } catch (err) {
-      if (this.modelName === 'gemini-2.5-flash') {
-        console.warn(`[GeminiVisionService] ${this.modelName} analyzeClips request failed: ${err.message}. Retrying with gemini-1.5-flash fallback...`);
-        data = await makeRequest('gemini-1.5-flash');
-      } else {
-        throw err;
+    const maxRetries = 5;
+    let attempt = 0;
+    while (attempt < maxRetries) {
+      try {
+        console.log(`[GeminiVisionService] Sending analyzeClips request with model: ${this.modelName} (Attempt ${attempt + 1}/${maxRetries})`);
+        data = await makeRequest(this.modelName);
+        break;
+      } catch (err) {
+        attempt++;
+        const isTransient = err.message.includes('503') || err.message.includes('429') || err.message.toLowerCase().includes('demand') || err.message.toLowerCase().includes('quota') || err.message.toLowerCase().includes('rate') || err.message.toLowerCase().includes('unavailable');
+        if (isTransient && attempt < maxRetries) {
+          const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+          console.warn(`[GeminiVisionService] Transient error (503/429) on attempt ${attempt}: ${err.message}. Retrying in ${Math.round(delay)}ms...`);
+          await new Promise(r => setTimeout(r, delay));
+        } else {
+          throw new Error(`Gemini Vision API request failed after ${attempt} attempts: ${err.message}`);
+        }
       }
     }
 

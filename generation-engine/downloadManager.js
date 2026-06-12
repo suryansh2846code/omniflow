@@ -31,10 +31,15 @@ export class DownloadManager {
       fs.unlinkSync(finalPath);
     }
 
-    // Configure Chrome to silently download to our target directory
+    // Create a unique temporary subdirectory for this download to avoid races/collisions
+    const uniqueSubdirName = `download-${filename.replace(/[^a-zA-Z0-9]/g, '_')}-${Date.now()}`;
+    const uniqueSubdirPath = path.join(absoluteOutputDir, uniqueSubdirName);
+    fs.mkdirSync(uniqueSubdirPath, { recursive: true });
+
+    // Configure Chrome to silently download to our unique directory
     await this.client.send('Page.setDownloadBehavior', {
       behavior: 'allow',
-      downloadPath: absoluteOutputDir
+      downloadPath: uniqueSubdirPath
     });
 
     let downloadGuid = null;
@@ -117,25 +122,20 @@ export class DownloadManager {
       console.log(`[DownloadManager] Waiting for download to complete...`);
       await downloadCompletePromise;
       
-      // The browser might save it as 'filename' or 'filename (1)' if there's a conflict.
-      // We already deleted the target file, so it should be exactly 'filename'.
-      // However, sometimes it is saved by GUID as a .crdownload first. Let's verify the final file exists.
-      
       // Wait a tiny bit for the OS filesystem to catch up
-      await new Promise(r => setTimeout(r, 500));
+      await new Promise(r => setTimeout(r, 1000));
       
-      // If a file was saved as actualFilename (e.g. 'video.mp4'), rename it to our finalPath
+      let downloadedFile = null;
       if (actualFilename) {
-        const expectedChromePath = path.join(absoluteOutputDir, actualFilename);
-        if (fs.existsSync(expectedChromePath) && expectedChromePath !== finalPath) {
-          fs.renameSync(expectedChromePath, finalPath);
+        const expectedChromePath = path.join(uniqueSubdirPath, actualFilename);
+        if (fs.existsSync(expectedChromePath)) {
+          downloadedFile = expectedChromePath;
         }
       }
-
-      if (!fs.existsSync(finalPath)) {
-        // Fallback: Check if there's only one mp4 in the directory that was recently created, 
-        // or just rely on actualFilename (with possible Chrome renaming like video (1).mp4).
-        const files = fs.readdirSync(absoluteOutputDir);
+      
+      if (!downloadedFile) {
+        // Fallback: Check if there's only one mp4 in the directory
+        const files = fs.readdirSync(uniqueSubdirPath);
         
         // Let's try to find a file that starts with the base name
         const baseName = actualFilename ? path.parse(actualFilename).name : 'video';
@@ -144,15 +144,20 @@ export class DownloadManager {
         if (matchingFiles.length > 0) {
           // Rename the most recently created one
           const mostRecent = matchingFiles.map(f => {
-            const p = path.join(absoluteOutputDir, f);
+            const p = path.join(uniqueSubdirPath, f);
             return { path: p, mtime: fs.statSync(p).mtime.getTime() };
           }).sort((a, b) => b.mtime - a.mtime)[0];
           
-          fs.renameSync(mostRecent.path, finalPath);
-        } else {
-           throw new Error("Download completed event fired, but file was not found at expected path: " + finalPath);
+          downloadedFile = mostRecent.path;
         }
       }
+
+      if (!downloadedFile || !fs.existsSync(downloadedFile)) {
+        throw new Error("Download completed event fired, but file was not found in unique temp directory: " + uniqueSubdirPath);
+      }
+      
+      // Move the file from unique temp directory to the final destination path
+      fs.renameSync(downloadedFile, finalPath);
       
       console.log(`[DownloadManager] Download successfully saved to: ${finalPath}`);
       return finalPath;
@@ -162,13 +167,15 @@ export class DownloadManager {
          behavior: 'default'
        }).catch(() => {});
        
-       // Note: In our current CDPClient, we added a removeListener method, 
-       // but we don't have the reference to remove these specific anonymous arrow functions easily 
-       // if we passed them inline. We extracted them, so we can clean up if supported.
-       if (typeof this.client.removeListener === 'function') {
-         // Need reference to the progress listener to remove it properly in a real app, 
-         // but since the tab usually closes right after this, it's generally safe.
+       // Clean up the unique temp directory
+       if (fs.existsSync(uniqueSubdirPath)) {
+         try {
+           fs.rmSync(uniqueSubdirPath, { recursive: true, force: true });
+         } catch (e) {
+           console.error(`[DownloadManager] Error cleaning up temporary directory ${uniqueSubdirPath}:`, e.message);
+         }
        }
+       
        if (this._currentTimeout) {
          clearTimeout(this._currentTimeout);
        }

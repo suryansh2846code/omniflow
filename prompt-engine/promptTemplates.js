@@ -93,9 +93,11 @@ You MUST follow these rules to maintain visual and narrative consistency:
    - shotPlanner: Define visual staging (shotType, framing, cameraMovement, focalStyle, purpose).
    - transitionPlanner: Define entry/exit transitions.
    - threeLayerPrompt: Create high-quality, elegant, and natural cinematic prompt layers. Avoid robotic prefix headers or metadata codes.
-     - master: Natural prose describing the setting and character in detail (e.g. "A retro-futuristic synthwave city street at dusk, neon signs reflecting off wet pavement. A young woman with a leather jacket and neon visor looks around.").
-     - clip: Clean, fluid, and natural description of the specific action goal of the character in this clip (e.g. "She accesses a pocket hologram device, illuminating her face as she walks dynamically through the crowds.").
-     - technical: Direct visual rendering, color, lighting, and camera lens instructions (e.g. "volumetric lighting, cool magenta and blue highlights, cinematic depth of field, captured on a 24mm camera lens with slow panning motion").
+      - master: Natural prose describing the setting and character in detail. Start this prompt by explicitly directing Gemini to generate a video rather than text (e.g. "Create a video clip of: A retro-futuristic synthwave city street at dusk, neon signs reflecting off wet pavement. A young woman with a leather jacket and neon visor looks around.").
+      - clip: Clean, fluid, and natural description of the specific action goal of the character in this clip (e.g. "She accesses a pocket hologram device, illuminating her face as she walks dynamically through the crowds.").
+      - technical: Direct visual rendering, color, lighting, and camera lens instructions (e.g. "volumetric lighting, cool magenta and blue highlights, cinematic depth of field, captured on a 24mm camera lens with slow panning motion").
+
+You MUST prefix all generated final prompts with: "Create a video of: " to explicitly force Gemini into video rendering mode. Do NOT allow conversational analyses or descriptive reviews.
 
 You MUST respond strictly in valid JSON matching the schema provided. No markdown wrapping unless requested.`;
 

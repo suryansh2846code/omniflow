@@ -58,6 +58,7 @@ export class UploadManager {
 
     // 1. Intercept file chooser
     await this.client.send('Page.enable');
+    await this.client.send('DOM.enable');
     await this.client.send('Page.setInterceptFileChooserDialog', { enabled: true });
 
     let fileChooserBackendNodeId = null;
@@ -120,7 +121,13 @@ export class UploadManager {
           }
           const items = deepQuerySelectorAll('[role="menuitem"]');
           if (items.length > 0) {
-              let target = items.find(i => (i.textContent||'').toLowerCase().includes('upload'));
+              let target = items.find(i => {
+                const text = (i.textContent || '').toLowerCase();
+                return text.includes('create video') || text.includes('video');
+              });
+              if (!target) {
+                target = items.find(i => (i.textContent || '').toLowerCase().includes('upload'));
+              }
               if (!target) target = items[0];
               const rect = target.getBoundingClientRect();
               return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, found: true };
@@ -153,10 +160,10 @@ export class UploadManager {
 
     console.log(`[UploadManager] Injecting file: ${absolutePath}`);
 
-    // 5. Submit file using the official Page.handleFileChooser API
-    await this.client.send('Page.handleFileChooser', {
-      action: 'accept',
-      files: [absolutePath]
+    // 5. Submit file using the official DOM.setFileInputFiles API
+    await this.client.send('DOM.setFileInputFiles', {
+      files: [absolutePath],
+      backendNodeId: fileChooserBackendNodeId
     });
     
     await this.client.send('Page.setInterceptFileChooserDialog', { enabled: false });

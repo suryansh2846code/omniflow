@@ -4,6 +4,27 @@ import path from 'path';
 import os from 'os';
 import { URL } from 'url';
 import { execSync } from 'child_process';
+import { AsyncLocalStorage } from 'async_hooks';
+
+const logStorage = new AsyncLocalStorage();
+const originalLog = console.log;
+const originalError = console.error;
+
+console.log = (...args) => {
+  originalLog(...args);
+  const sendEvent = logStorage.getStore();
+  if (sendEvent) {
+    sendEvent('log', args.join(' '));
+  }
+};
+
+console.error = (...args) => {
+  originalError(...args);
+  const sendEvent = logStorage.getStore();
+  if (sendEvent) {
+    sendEvent('error', args.join(' '));
+  }
+};
 
 if (fs.existsSync('.env')) {
   fs.readFileSync('.env', 'utf8').split(/\r?\n/).forEach(line => {
@@ -734,41 +755,34 @@ const server = http.createServer(async (req, res) => {
       res.write(`data: ${JSON.stringify({ type, data })}\n\n`);
     };
 
-    const originalLog = console.log;
-    const originalError = console.error;
+    logStorage.run(sendEvent, () => {
+      (async () => {
+        try {
+          console.log(`[Master] Initializing GenerationEngine with chromePort: ${chromePort}...`);
+          const engine = new GenerationEngine({ chromePort });
 
-    console.log = (...args) => {
-      originalLog(...args);
-      sendEvent('log', args.join(' '));
-    };
-    console.error = (...args) => {
-      originalError(...args);
-      sendEvent('error', args.join(' '));
-    };
+          const result = await engine.runJob({
+            clipId,
+            videoPath,
+            prompt,
+            geminiUrl: 'https://gemini.google.com',
+            downloadOutputDir: tempDir
+          });
 
-    (async () => {
-      try {
-        console.log(`[Master] Initializing GenerationEngine with chromePort: ${chromePort}...`);
-        const engine = new GenerationEngine({ chromePort });
-
-        const result = await engine.runJob({
-          clipId,
-          videoPath,
-          prompt,
-          geminiUrl: 'https://gemini.google.com',
-          downloadOutputDir: tempDir
-        });
-
-        sendEvent('result', result);
-      } catch (err) {
-        console.error(`[Master] Execution Error: ${err.message}`);
-        sendEvent('error', err.message);
-      } finally {
-        console.log = originalLog;
-        console.error = originalError;
-        res.end();
-      }
-    })();
+          if (result && result.error) {
+            console.error(`[Master] Job failed for ${clipId}: ${result.error}`);
+            sendEvent('error', result.error);
+          } else {
+            sendEvent('result', result);
+          }
+        } catch (err) {
+          console.error(`[Master] Execution Error: ${err.message}`);
+          sendEvent('error', err.message);
+        } finally {
+          res.end();
+        }
+      })();
+    });
     return;
   }
 
@@ -804,14 +818,14 @@ const server = http.createServer(async (req, res) => {
         console.log(`\n================================`);
         console.log(`[Master] 2. Analyzing with Video Intelligence...`);
         const intelLayer = new VideoIntelligenceLayer({ 
-          apiKey,
+          apiKey: apiKey || process.env.GEMINI_API_KEY,
           modelName: process.env.VISION_MODEL || 'gemini-1.5-flash'
         });
         const intelResult = await intelLayer.processClips(clipPaths, targetPrompt, { tempDir });
 
         console.log(`[Master] 3. Generating Layered Prompts...`);
         const promptEngine = new PromptIntelligenceEngine({ 
-          apiKey: apiKey || undefined,
+          apiKey: apiKey || process.env.GEMINI_API_KEY,
           modelName: process.env.PROMPT_ENGINE_MODEL || 'gemini-1.5-flash'
         });
 
